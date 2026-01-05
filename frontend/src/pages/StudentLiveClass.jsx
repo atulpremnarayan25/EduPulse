@@ -345,15 +345,50 @@ const StudentLiveClass = () => {
 
     if (isWaiting) {
         return (
-            <div className="flex h-screen items-center justify-center bg-gray-50 flex-col">
-                <div className="flex items-center">
-                    <button onClick={() => setShowSettings(true)} className="mr-2 px-3 py-1.5 bg-gray-600 text-white rounded hover:bg-gray-700 text-sm">⚙️ Settings</button>
-                    <h1 className="text-xl font-bold text-gray-800 mr-4">Class: {classId}</h1>
-                    <span className="text-sm text-gray-600 bg-gray-100 px-3 py-1 rounded-full">👥 {activeStudents} Active</span>
+            <div className="flex h-screen bg-gray-50 overflow-hidden relative">
+                <div className="flex-1 flex flex-col items-center justify-center p-4">
+                    <div className="flex items-center mb-6">
+                        <button onClick={() => setShowSettings(true)} className="mr-2 px-3 py-1.5 bg-gray-600 text-white rounded hover:bg-gray-700 text-sm flex items-center gap-2">
+                            <span>⚙️</span> Settings
+                        </button>
+                        <h1 className="text-xl font-bold text-gray-800 mr-4">Class: {classId}</h1>
+                        <span className="text-sm text-gray-600 bg-gray-100 px-3 py-1 rounded-full border border-gray-200">👥 {activeStudents} Active</span>
+                    </div>
+
+                    <div className="bg-white p-8 rounded-3xl shadow-xl text-center max-w-md w-full border border-gray-100 relative overflow-hidden">
+                        <div className="absolute top-0 left-0 w-full h-2 bg-indigo-500 animate-pulse"></div>
+                        <div className="animate-bounce mb-6 text-6xl">⏳</div>
+                        <h2 className="text-2xl font-bold text-gray-800 mb-2">Waiting Room</h2>
+                        <p className="text-gray-500 mb-8">Waiting for the teacher to admit you...</p>
+
+                        <button
+                            onClick={() => setShowChat(!showChat)}
+                            className="w-full py-3 bg-indigo-50 text-indigo-600 font-bold rounded-xl hover:bg-indigo-100 transition flex items-center justify-center gap-2"
+                        >
+                            <span>💬</span> {showChat ? 'Hide Chat' : 'Chat with Teacher'}
+                        </button>
+                    </div>
                 </div>
-                <div className="animate-pulse mb-4 text-6xl">⏳</div>
-                <h2 className="text-2xl font-bold text-gray-800">Waiting for Teacher...</h2>
-                <p className="text-gray-600">Your join request has been sent.</p>
+
+                {/* Waiting Room Chat Panel */}
+                <div className={`fixed inset-y-0 right-0 w-full md:w-96 bg-white shadow-2xl transform transition-transform duration-300 z-50 flex flex-col ${showChat ? 'translate-x-0' : 'translate-x-full'}`}>
+                    <div className="p-4 border-b flex justify-between items-center bg-indigo-600 text-white">
+                        <h3 className="font-bold">Lobby Chat</h3>
+                        <button onClick={() => setShowChat(false)} className="hover:bg-indigo-700 p-1 rounded">✕</button>
+                    </div>
+                    <div className="flex-1 overflow-hidden">
+                        <ChatBox
+                            socket={socket}
+                            classId={classId}
+                            user={{ name: user.name, id: user.id }}
+                            isOpen={true}
+                            onClose={() => setShowChat(false)}
+                            className="w-full h-full flex flex-col"
+                            messages={messages}
+                        />
+                    </div>
+                </div>
+
                 {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
             </div>
         );

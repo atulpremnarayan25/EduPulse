@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate, Link, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import api from '../config/api';
-import { API_URL } from '../config/api';
 import { useToast } from '../context/ToastContext';
 import { useSocket } from '../context/SocketContext';
 
@@ -47,22 +46,14 @@ const Login = () => {
         setFormData({ ...formData, [e.target.name]: e.target.value });
     };
 
-    const handleGoogleLogin = () => {
-        window.location.href = `${API_URL}/api/auth/google`;
-    };
-
-    const handleGithubLogin = () => {
-        window.location.href = `${API_URL}/api/auth/github`;
-    };
-
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         setLoading(true);
 
         const url = role === 'student'
-            ? `${API_URL}/api/auth/student/login`
-            : `${API_URL}/api/auth/teacher/login`;
+            ? '/api/auth/student/login'
+            : '/api/auth/teacher/login';
 
         const payload = role === 'student'
             ? { rollNo: formData.rollNo, password: formData.password }
@@ -200,25 +191,10 @@ const Login = () => {
                         </button>
                     </form>
 
-                    <div className="mt-8">
-                        <p className="align-center text-center text-sm text-gray-500 mb-4">Or continue with</p>
-                        <div className="flex gap-4 justify-center">
-                            <button onClick={handleGoogleLogin} className="flex-1 max-w-[140px] flex items-center justify-center gap-2 bg-white border border-gray-200 text-gray-700 px-4 py-2.5 rounded-xl hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm">
-                                <img src="https://www.svgrepo.com/show/475656/google-color.svg" className="w-5 h-5" alt="Google" />
-                                <span className="font-medium text-sm">Google</span>
-                            </button>
-                            <button onClick={handleGithubLogin} className="flex-1 max-w-[140px] flex items-center justify-center gap-2 bg-white border border-gray-200 text-gray-700 px-4 py-2.5 rounded-xl hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm">
-                                <img src="https://www.svgrepo.com/show/512317/github-142.svg" className="w-5 h-5" alt="GitHub" />
-                                <span className="font-medium text-sm">GitHub</span>
-                            </button>
-                        </div>
-                    </div>
-
-                    <p className="mt-8 text-center text-sm text-gray-600">
-                        Don't have an account?{' '}
-                        <Link to="/register" className="font-bold text-indigo-600 hover:text-indigo-800 hover:underline">
-                            Create Account
-                        </Link>
+                    <p className="mt-8 text-center text-sm text-gray-500">
+                        <a href="/admin/login" className="text-gray-400 hover:text-gray-600 hover:underline">
+                            Admin Login
+                        </a>
                     </p>
                 </div>
             </div>

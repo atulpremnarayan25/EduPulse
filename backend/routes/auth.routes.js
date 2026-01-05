@@ -1,47 +1,34 @@
 const express = require('express');
 const router = express.Router();
-const passport = require('passport');
-const { registerStudent, loginStudent, registerTeacher, loginTeacher, generateToken } = require('../controllers/auth.controller');
+const {
+    loginStudent,
+    loginTeacher,
+    generateToken,
+    changePassword,
+    createStudentByTeacher,
+    getMyClass,
+    getMyClassStudents,
+    getMe
+} = require('../controllers/auth.controller');
 const { validate, schemas } = require('../middleware/validation');
+const { protect, restrictTo } = require('../middleware/auth');
 
-router.post('/student/register', validate(schemas.studentRegister), registerStudent);
+// Login routes (public)
 router.post('/student/login', validate(schemas.login), loginStudent);
-router.post('/teacher/register', validate(schemas.teacherRegister), registerTeacher);
 router.post('/teacher/login', validate(schemas.login), loginTeacher);
 
-// Google OAuth
-router.get('/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
+// Protected routes - require authentication
+router.use(protect);
 
-router.get('/google/callback',
-    passport.authenticate('google', { failureRedirect: process.env.CLIENT_URL + '/login?error=true' }),
-    (req, res) => {
-        // Successful authentication
-        const token = generateToken(req.user._id, req.user.role);
-        // Redirect to frontend with token
-        // In production, use cookies or a secure way. For this demo, query param.
-        const userStr = encodeURIComponent(JSON.stringify({
-            id: req.user._id,
-            name: req.user.name,
-            role: req.user.role
-        }));
-        res.redirect(`${process.env.CLIENT_URL || 'http://localhost:5173'}/login?token=${token}&user=${userStr}`);
-    }
-);
+// Get current user info
+router.get('/me', getMe);
 
-// GitHub OAuth
-router.get('/github', passport.authenticate('github', { scope: ['user:email'] }));
+// Password change (for students and teachers)
+router.post('/change-password', changePassword);
 
-router.get('/github/callback',
-    passport.authenticate('github', { failureRedirect: process.env.CLIENT_URL + '/login?error=true' }),
-    (req, res) => {
-        const token = generateToken(req.user._id, req.user.role);
-        const userStr = encodeURIComponent(JSON.stringify({
-            id: req.user._id,
-            name: req.user.name,
-            role: req.user.role
-        }));
-        res.redirect(`${process.env.CLIENT_URL || 'http://localhost:5173'}/login?token=${token}&user=${userStr}`);
-    }
-);
+// Home teacher routes
+router.get('/teacher/my-class', restrictTo('teacher'), getMyClass);
+router.get('/teacher/my-class/students', restrictTo('teacher'), getMyClassStudents);
+router.post('/teacher/my-class/students', restrictTo('teacher'), validate(schemas.studentCreate), createStudentByTeacher);
 
 module.exports = router;

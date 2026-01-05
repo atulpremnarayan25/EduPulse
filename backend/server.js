@@ -24,7 +24,7 @@ app.use(helmet());
 
 // Rate Limiting
 const limiter = rateLimit({
-    max: 200, // Limit each IP to 200 requests per windowMs
+    max: 2000, // Increased to 2000 to accommodate classroom usage (many users sharing IP)
     windowMs: 60 * 60 * 1000, // 1 hour
     message: 'Too many requests from this IP, please try again in an hour!'
 });
@@ -37,21 +37,38 @@ app.use(cors({
         if (!origin) return callback(null, true);
 
         const allowedOrigins = [
-            process.env.CLIENT_URL || "http://localhost:5173",
+            process.env.CLIENT_URL,
             "http://localhost:5173",
-            "http://10.111.165.217:5173"
         ];
+
+        // Strict PROD check: If NODE_ENV is production and CLIENT_URL is set, restrict
+        if (process.env.NODE_ENV === 'production' && process.env.CLIENT_URL) {
+            if (origin === process.env.CLIENT_URL || origin.includes('.vercel.app')) {
+                return callback(null, true);
+            }
+            return callback(new Error('Not allowed by CORS'));
+        }
+
+        // DEVELOPMENT / LOCAL: Allow broad access for easier testing
 
         // Allow all Vercel preview and production URLs
         if (origin.includes('.vercel.app')) {
             return callback(null, true);
         }
 
-        if (allowedOrigins.indexOf(origin) !== -1 || !origin) {
-            callback(null, true);
-        } else {
-            callback(new Error('Not allowed by CORS'));
+        // Allow localhost variations
+        if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
+            return callback(null, true);
         }
+
+        // Allow local network IPs (192.168.x.x, 10.x.x.x, 172.16-31.x.x)
+        const localNetworkPattern = /^https?:\/\/(192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?$/;
+        if (localNetworkPattern.test(origin)) {
+            return callback(null, true);
+        }
+
+        // Default: Allow for dev
+        callback(null, true);
     },
     methods: ["GET", "POST", "PUT", "DELETE"],
     credentials: true
@@ -75,47 +92,34 @@ const io = new Server(server, {
         origin: function (origin, callback) {
             if (!origin) return callback(null, true);
 
-            const allowedOrigins = [
-                process.env.CLIENT_URL || "http://localhost:5173",
-                "http://localhost:5173",
-                "http://10.111.165.217:5173"
-            ];
-
             // Allow all Vercel preview and production URLs
             if (origin.includes('.vercel.app')) {
                 return callback(null, true);
             }
 
-            if (allowedOrigins.indexOf(origin) !== -1) {
-                callback(null, true);
-            } else {
-                callback(null, false);
+            // Allow localhost variations
+            if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
+                return callback(null, true);
             }
+
+            // Allow local network IPs (192.168.x.x, 10.x.x.x, 172.16-31.x.x)
+            const localNetworkPattern = /^https?:\/\/(192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?$/;
+            if (localNetworkPattern.test(origin)) {
+                return callback(null, true);
+            }
+
+            // For development, allow all origins
+            callback(null, true);
         },
         methods: ["GET", "POST"],
         credentials: true
     }
 });
 
-const session = require('express-session');
-const passport = require('passport');
-require('./config/passport'); // Config
-
 app.use((req, res, next) => {
     req.io = io;
     next();
 });
-
-// Session Middleware (Required for Passport 0.6+)
-app.use(session({
-    secret: process.env.JWT_SECRET || 'secret_key',
-    resave: false,
-    saveUninitialized: false
-}));
-
-// Passport Middleware
-app.use(passport.initialize());
-app.use(passport.session());
 
 // Socket Event Handlers
 const { Class } = require('./models');
@@ -315,6 +319,10 @@ io.on('connection', (socket) => {
 
         roomState.waitingStudents.set(socket.id, data);
         await saveRoomState(data.classId, roomState);
+
+        // Join the socket room immediately to allow lobby chat
+        socket.join(data.classId);
+
         console.log(`[WAITING ROOM] Added to waiting list. Total waiting: ${roomState.waitingStudents.size}`);
 
         broadcastWaitingList(data.classId);
@@ -413,6 +421,7 @@ const authRoutes = require('./routes/auth.routes');
 const classRoutes = require('./routes/class.routes');
 const quizRoutes = require('./routes/quiz.routes');
 const analyticsRoutes = require('./routes/analytics.routes');
+const adminRoutes = require('./routes/admin.routes');
 
 const AppError = require('./utils/AppError');
 const globalErrorHandler = require('./middleware/error');
@@ -421,6 +430,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/class', classRoutes);
 app.use('/api/quiz', quizRoutes);
 app.use('/api/analytics', analyticsRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Handle Unhandled Routes
 app.all(/(.*)/, (req, res, next) => {
@@ -431,8 +441,10 @@ app.all(/(.*)/, (req, res, next) => {
 app.use(globalErrorHandler);
 
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+const HOST = process.env.HOST || '0.0.0.0'; // Listen on all network interfaces
+
+server.listen(PORT, HOST, () => {
+    console.log(`Server running on ${HOST}:${PORT}`);
 });
 
 // Export io to be used in controllers

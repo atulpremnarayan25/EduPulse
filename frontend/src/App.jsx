@@ -5,7 +5,8 @@ import TeacherDashboard from './pages/TeacherDashboard';
 import StudentPanel from './pages/StudentPanel';
 import LiveClass from './pages/LiveClass';
 import StudentLiveClass from './pages/StudentLiveClass';
-import Register from './pages/Register';
+import AdminLogin from './pages/AdminLogin';
+import AdminDashboard from './pages/AdminDashboard';
 import PrivateRoute from './components/PrivateRoute';
 import { ToastProvider } from './context/ToastContext';
 import { ConfirmProvider } from './context/ConfirmContext';
@@ -25,8 +26,19 @@ function App() {
           <main className="flex-grow container mx-auto px-4 py-6 md:p-8 w-full max-w-7xl pb-24 md:pb-8">
             <Routes>
               <Route path="/login" element={<Login />} />
-              <Route path="/register" element={<Register />} />
 
+              {/* Admin Routes */}
+              <Route path="/admin/login" element={<AdminLogin />} />
+              <Route
+                path="/admin"
+                element={
+                  <PrivateRoute role="admin">
+                    <AdminDashboard />
+                  </PrivateRoute>
+                }
+              />
+
+              {/* Teacher Routes */}
               <Route
                 path="/teacher"
                 element={
@@ -44,6 +56,7 @@ function App() {
                 }
               />
 
+              {/* Student Routes */}
               <Route
                 path="/student"
                 element={

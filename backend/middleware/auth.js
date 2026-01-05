@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-const { Student, Teacher } = require('../models');
+const { Admin, Student, Teacher } = require('../models');
 const AppError = require('../utils/AppError');
 const catchAsync = require('../utils/catchAsync');
 
@@ -24,7 +24,9 @@ exports.protect = catchAsync(async (req, res, next) => {
 
     // 3) Check if user still exists
     let currentUser;
-    if (decoded.role === 'teacher') {
+    if (decoded.role === 'admin') {
+        currentUser = await Admin.findById(decoded.id);
+    } else if (decoded.role === 'teacher') {
         currentUser = await Teacher.findById(decoded.id);
     } else {
         currentUser = await Student.findById(decoded.id);

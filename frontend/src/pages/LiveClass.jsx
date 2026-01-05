@@ -701,12 +701,7 @@ const LiveClass = () => {
 
                         {/* Actions */}
                         <div className="flex justify-end gap-4 pt-4 border-t border-gray-700">
-                            <button
-                                onClick={finalCloseClass}
-                                className="px-6 py-3 rounded-xl text-gray-300 hover:text-white hover:bg-gray-800 transition font-medium"
-                            >
-                                Close Class
-                            </button>
+
                             {/* NEW CHAT DOWNLOAD BUTTON */}
                             <button
                                 onClick={downloadChat}

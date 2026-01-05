@@ -57,11 +57,11 @@ export default function Home() {
                             className="text-5xl md:text-7xl font-extrabold tracking-tight mb-8"
                         >
                             <span className="bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 drop-shadow-sm">
-                                Revolutionizing
+                                The Complete
                             </span>
                             <br />
                             <span className="text-gray-900 drop-shadow-lg">
-                                Online Education
+                                Digital Campus
                             </span>
                         </motion.h1>
 
@@ -69,23 +69,23 @@ export default function Home() {
                             variants={itemVariants}
                             className="text-xl md:text-2xl text-gray-700 mb-10 leading-relaxed max-w-2xl mx-auto backdrop-blur-sm bg-white/30 p-4 rounded-xl"
                         >
-                            Experience the future of learning with EduPulse. real-time interaction,
-                            immersive virtual classrooms, and seamless collaboration.
+                            Complete digital campus solution. Seamlessly managing classrooms,
+                            students, and live interactive learning sessions in one secure platform.
                         </motion.p>
 
                         <motion.div
                             variants={itemVariants}
                             className="flex flex-col sm:flex-row gap-4 justify-center items-center"
                         >
-                            <Link to="/register" className="group relative px-8 py-4 bg-indigo-600 text-white rounded-full font-bold text-lg overflow-hidden shadow-lg shadow-indigo-500/40 hover:shadow-indigo-500/60 transition-all">
+                            <Link to="/login" className="group relative px-8 py-4 bg-indigo-600 text-white rounded-full font-bold text-lg overflow-hidden shadow-lg shadow-indigo-500/40 hover:shadow-indigo-500/60 transition-all">
                                 <span className="relative z-10 flex items-center gap-2">
-                                    Get Started Free <Zap size={20} className="group-hover:fill-current" />
+                                    Login to Portal <Zap size={20} className="group-hover:fill-current" />
                                 </span>
                                 <div className="absolute inset-0 bg-gradient-to-r from-violet-600 to-indigo-600 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                             </Link>
 
-                            <Link to="/login" className="px-8 py-4 bg-white/80 backdrop-blur-md text-indigo-900 rounded-full font-bold text-lg border border-indigo-200 hover:bg-white transition-all shadow-md hover:shadow-lg">
-                                Login to Portal
+                            <Link to="/admin/login" className="px-8 py-4 bg-white/80 backdrop-blur-md text-slate-700 rounded-full font-bold text-lg border border-slate-200 hover:bg-white transition-all shadow-md hover:shadow-lg flex items-center gap-2">
+                                <Shield size={20} /> Admin Access
                             </Link>
                         </motion.div>
                     </motion.div>

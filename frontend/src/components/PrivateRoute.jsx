@@ -15,12 +15,22 @@ const PrivateRoute = ({ children, role }) => {
     }
 
     if (!token || !user) {
+        // Redirect to appropriate login based on expected role
+        if (role === 'admin') {
+            return <Navigate to="/admin/login" replace />;
+        }
         return <Navigate to="/login" replace />;
     }
 
     if (role && user.role !== role) {
         // Redirect to their appropriate dashboard if they try to access wrong area
-        return <Navigate to={user.role === 'teacher' ? '/teacher' : '/student'} replace />;
+        if (user.role === 'admin') {
+            return <Navigate to="/admin" replace />;
+        } else if (user.role === 'teacher') {
+            return <Navigate to="/teacher" replace />;
+        } else {
+            return <Navigate to="/student" replace />;
+        }
     }
 
     return children;
