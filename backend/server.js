@@ -70,8 +70,9 @@ app.use(cors({
         // Default: Allow for dev
         callback(null, true);
     },
-    methods: ["GET", "POST", "PUT", "DELETE"],
-    credentials: true
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    credentials: true,
+    optionsSuccessStatus: 200 // some legacy browsers (IE11, various SmartTVs) choke on 204
 }));
 
 app.use(express.json());
@@ -518,6 +519,7 @@ app.use('/api/admin', adminRoutes);
 
 // Handle Unhandled Routes
 app.all(/(.*)/, (req, res, next) => {
+    console.error(`Status 404: Can't find ${req.originalUrl} on this server! Method: ${req.method}`);
     next(new AppError(`Can't find ${req.originalUrl} on this server!`, 404));
 });
 

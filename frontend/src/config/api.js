@@ -6,7 +6,8 @@ import axios from 'axios';
 const getApiUrl = () => {
     // If environment variable is set, use it
     if (import.meta.env.VITE_API_URL) {
-        return import.meta.env.VITE_API_URL;
+        // Remove trailing slash if present to avoid double slashes
+        return import.meta.env.VITE_API_URL.replace(/\/$/, "");
     }
 
     // For local development, try to use the same host as the frontend
