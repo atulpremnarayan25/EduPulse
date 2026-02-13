@@ -13,6 +13,8 @@ import { ConfirmProvider } from './context/ConfirmContext';
 import { Analytics } from "@vercel/analytics/react";
 import { SpeedInsights } from "@vercel/speed-insights/react";
 
+import AnalyticsDashboard from './pages/AnalyticsDashboard';
+
 import Navbar from './components/Navbar';
 import BottomNav from './components/BottomNav';
 
@@ -52,6 +54,14 @@ function App() {
                 element={
                   <PrivateRoute role="teacher">
                     <LiveClass />
+                  </PrivateRoute>
+                }
+              />
+              <Route
+                path="/teacher/analytics/:classId"
+                element={
+                  <PrivateRoute role="teacher">
+                    <AnalyticsDashboard />
                   </PrivateRoute>
                 }
               />

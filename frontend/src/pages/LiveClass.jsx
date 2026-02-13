@@ -18,6 +18,7 @@ import {
 } from '@livekit/components-react';
 import ChatBox from '../components/ChatBox';
 import BottomControlBar from '../components/BottomControlBar';
+import Leaderboard from '../components/Leaderboard';
 import { Track } from 'livekit-client';
 
 // Component to render video tracks
@@ -101,7 +102,7 @@ const LiveClass = () => {
     const [attentionData, setAttentionData] = useState([]);
     const [activeStudents, setActiveStudents] = useState(0);
     const [studentStates, setStudentStates] = useState({});
-    const [waitingStudents, setWaitingStudents] = useState([]); // List of students waiting
+    const [waitingStudents, setWaitingStudents] = useState([]);
 
     // Chat State
     const [messages, setMessages] = useState([]);
@@ -109,15 +110,19 @@ const LiveClass = () => {
     // Quiz State
     const [showQuizModal, setShowQuizModal] = useState(false);
     const [quizData, setQuizData] = useState({ question: '', options: ['', '', '', ''], correctAnswer: 0 });
+    const [quizStats, setQuizStats] = useState({}); // Per-quiz answer distribution
     const toast = useToast();
     const confirm = useConfirm();
+
+    // Gamification State
+    const [leaderboard, setLeaderboard] = useState([]);
 
     // Settings Panel State
     const [showSettings, setShowSettings] = useState(false);
     const [showParticipants, setShowParticipants] = useState(false);
     const [showChat, setShowChat] = useState(false);
     const [showAttention, setShowAttention] = useState(false);
-    const [showReportModal, setShowReportModal] = useState(false); // New: Report Modal State
+    const [showReportModal, setShowReportModal] = useState(false);
     const [livekitRoom, setLivekitRoom] = useState(null);
 
     // LiveKit State
@@ -244,6 +249,32 @@ const LiveClass = () => {
             setMessages((prev) => [...prev, data]);
         });
 
+        // Tab Switch tracking
+        socket.on('tab_switch_update', ({ studentId, tabSwitchCount, focusScore, totalIdleTime }) => {
+            setStudentStates(prev => {
+                const prevStudent = prev[studentId] || {};
+                return { ...prev, [studentId]: { ...prevStudent, tabSwitchCount, focusScore, totalIdleTime } };
+            });
+        });
+
+        // Student absent tracking
+        socket.on('student_absent_update', ({ studentId, engagementRate }) => {
+            setStudentStates(prev => {
+                const prevStudent = prev[studentId] || {};
+                return { ...prev, [studentId]: { ...prevStudent, status: 'ABSENT', engagementRate } };
+            });
+        });
+
+        // Quiz stats
+        socket.on('quiz_stats_update', (stats) => {
+            setQuizStats(stats);
+        });
+
+        // Leaderboard
+        socket.on('leaderboard_update', (data) => {
+            setLeaderboard(data);
+        });
+
         return () => {
             socket.emit('leave_class', { classId });
             socket.off('class_update');
@@ -252,6 +283,10 @@ const LiveClass = () => {
             socket.off('hand_update');
             socket.off('waiting_list_update');
             socket.off('receive_message');
+            socket.off('tab_switch_update');
+            socket.off('student_absent_update');
+            socket.off('quiz_stats_update');
+            socket.off('leaderboard_update');
         };
     }, [socket, classId]);
 
@@ -312,17 +347,24 @@ const LiveClass = () => {
     };
 
     const downloadCSV = () => {
-        // Headers
-        const headers = ['Student Name', 'Status', 'Attention Score', 'Participation (Responses)', 'Total Events'];
+        const headers = ['Student Name', 'Status', 'Attention Score', 'Focus Score', 'Tab Switches', 'Points', 'Engagement Rate', 'Responses', 'Total Events'];
 
-        // Data Rows
-        const rows = Object.values(studentStates).map(s => [
-            s.name || 'Unknown',
-            s.status,
-            `${s.score !== undefined ? s.score : 100}%`,
-            s.responsesCount || 0,
-            s.totalCount || 0
-        ]);
+        const rows = Object.values(studentStates).map(s => {
+            const totalEvents = s.totalCount || 0;
+            const totalResponses = s.responsesCount || 0;
+            const engagementRate = totalEvents > 0 ? Math.round((totalResponses / totalEvents) * 100) : 100;
+            return [
+                s.name || 'Unknown',
+                s.status || 'ATTENTIVE',
+                `${s.score !== undefined ? s.score : 100}%`,
+                `${s.focusScore !== undefined ? s.focusScore : 100}%`,
+                s.tabSwitchCount || 0,
+                s.points || 0,
+                `${engagementRate}%`,
+                totalResponses,
+                totalEvents
+            ];
+        });
 
         // CSV String
         const csvContent = [
@@ -455,16 +497,21 @@ const LiveClass = () => {
                                                 Object.values(studentStates).map((student) => (
                                                     <div key={student.id} className="flex items-center justify-between bg-[#1c1c1e] p-2 rounded border border-gray-800">
                                                         <div className="flex items-center gap-2">
-                                                            {/* Status Dot */}
-                                                            <div className={`w-2 h-2 rounded-full ${student.status === 'DISTRACTED' ? 'bg-red-500' : 'bg-green-500'
-                                                                }`} title={student.status === 'DISTRACTED' ? 'Distracted' : 'Focused'} />
+                                                            <div className={`w-2 h-2 rounded-full ${student.status === 'ABSENT' ? 'bg-orange-500' :
+                                                                student.status === 'DISTRACTED' ? 'bg-red-500' : 'bg-green-500'
+                                                                }`} title={student.status || 'Focused'} />
                                                             <span className="text-white text-sm font-medium">{student.name || 'Unknown Student'}</span>
                                                             <span className="text-gray-400 text-xs ml-2">
                                                                 ({student.responsesCount !== undefined ? student.responsesCount : 0} / {student.totalCount !== undefined ? student.totalCount : 0})
                                                             </span>
                                                         </div>
-                                                        {/* Status Icons */}
                                                         <div className="flex items-center gap-1">
+                                                            {student.status === 'ABSENT' && (
+                                                                <span className="text-xs px-1.5 py-0.5 rounded bg-orange-900 text-orange-300 font-bold">ABSENT</span>
+                                                            )}
+                                                            {student.tabSwitchCount > 0 && (
+                                                                <span className="text-xs text-gray-400" title="Tab Switches">🔀{student.tabSwitchCount}</span>
+                                                            )}
                                                             {student.handRaised && <span className="text-xs" title="Hand Raised">✋</span>}
                                                         </div>
                                                     </div>
@@ -484,26 +531,80 @@ const LiveClass = () => {
                                         <h3 className="font-bold text-white text-lg flex items-center gap-2">
                                             ⚠️ Attention Dashboard
                                         </h3>
-                                        <button
-                                            onClick={() => setShowAttention(false)}
-                                            className="text-gray-400 hover:text-white"
-                                        >
-                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                            </svg>
-                                        </button>
+                                        <div className="flex items-center gap-3">
+                                            <button
+                                                onClick={() => window.open(`/teacher/analytics/${classId}`, '_blank')}
+                                                className="text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg flex items-center gap-1 transition-colors shadow-lg shadow-indigo-500/20"
+                                            >
+                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
+                                                Full Analytics
+                                            </button>
+                                            <button
+                                                onClick={() => setShowAttention(false)}
+                                                className="text-gray-400 hover:text-white"
+                                            >
+                                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                                </svg>
+                                            </button>
+                                        </div>
                                     </div>
 
                                     {/* Class Average Score */}
                                     <div className="mb-6 bg-gradient-to-r from-purple-900 to-indigo-900 rounded-xl p-6 text-center border border-purple-500/30 shadow-lg">
                                         <h4 className="text-gray-300 text-sm font-medium uppercase tracking-wider mb-2">Class Attention Score</h4>
                                         <div className="text-5xl font-bold text-white mb-1">
-                                            {/* Calculate dynamic average from student states */}
                                             {Object.keys(studentStates).length > 0
                                                 ? Math.round(Object.values(studentStates).reduce((acc, s) => acc + (s.score !== undefined ? s.score : 100), 0) / Object.values(studentStates).length)
                                                 : '--'}%
                                         </div>
                                         <p className="text-xs text-purple-300">Live Average based on checks & quizzes</p>
+                                    </div>
+
+                                    {/* Quiz Analytics Section */}
+                                    {Object.keys(quizStats).length > 0 && (
+                                        <div className="mb-6">
+                                            <h4 className="text-gray-400 font-semibold mb-3 text-sm uppercase tracking-wider">📊 Quiz Analytics</h4>
+                                            <div className="space-y-3">
+                                                {Object.entries(quizStats).map(([quizId, stats], index) => {
+                                                    const correctPct = stats.totalResponses > 0 ? Math.round((stats.correctCount / stats.totalResponses) * 100) : 0;
+                                                    return (
+                                                        <div key={quizId} className="bg-[#1c1c1e] p-3 rounded-lg border border-gray-800">
+                                                            <div className="flex justify-between items-center mb-2">
+                                                                <span className="text-white font-medium text-sm">Quiz #{index + 1}</span>
+                                                                <span className="text-xs text-gray-400">{stats.totalResponses} responses</span>
+                                                            </div>
+                                                            <div className="flex items-center gap-2 mb-2">
+                                                                <div className="flex-1 bg-gray-700 rounded-full h-2 overflow-hidden">
+                                                                    <div
+                                                                        className={`h-full rounded-full ${correctPct >= 70 ? 'bg-green-500' : correctPct >= 40 ? 'bg-yellow-500' : 'bg-red-500'}`}
+                                                                        style={{ width: `${correctPct}%` }}
+                                                                    />
+                                                                </div>
+                                                                <span className={`text-sm font-bold ${correctPct >= 70 ? 'text-green-400' : correctPct >= 40 ? 'text-yellow-400' : 'text-red-400'}`}>
+                                                                    {correctPct}% correct
+                                                                </span>
+                                                            </div>
+                                                            {/* Answer Distribution */}
+                                                            <div className="flex gap-1">
+                                                                {Object.entries(stats.answerDistribution || {}).sort((a, b) => a[0] - b[0]).map(([ansIdx, count]) => (
+                                                                    <div key={ansIdx} className="flex-1 text-center">
+                                                                        <div className="text-xs text-gray-500 mb-0.5">{String.fromCharCode(65 + parseInt(ansIdx))}</div>
+                                                                        <div className="bg-gray-700 rounded px-1 py-0.5 text-xs text-gray-300 font-mono">{count}</div>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Leaderboard */}
+                                    <div className="mb-6">
+                                        <h4 className="text-gray-400 font-semibold mb-3 text-sm uppercase tracking-wider">🏆 Leaderboard</h4>
+                                        <Leaderboard leaderboard={leaderboard} />
                                     </div>
 
                                     {/* Student List with Status */}
@@ -516,23 +617,42 @@ const LiveClass = () => {
                                                 Object.values(studentStates).map((student) => (
                                                     <div key={student.id} className="bg-[#1c1c1e] p-3 rounded-lg border border-gray-800 flex items-center justify-between hover:border-gray-700 transition">
                                                         <div className="flex items-center gap-3">
-                                                            <div className={`w-3 h-3 rounded-full shadow-sm ${student.status === 'DISTRACTED' ? 'bg-red-500 shadow-red-500/50' : 'bg-green-500 shadow-green-500/50'}`} />
+                                                            <div className={`w-3 h-3 rounded-full shadow-sm ${student.status === 'ABSENT' ? 'bg-orange-500 shadow-orange-500/50' :
+                                                                student.status === 'DISTRACTED' ? 'bg-red-500 shadow-red-500/50' : 'bg-green-500 shadow-green-500/50'
+                                                                }`} />
                                                             <div>
                                                                 <div className="text-white font-medium">{student.name || 'Unknown'}</div>
-                                                                <div className="flex gap-2 text-xs">
-                                                                    <span className={`${student.status === 'DISTRACTED' ? 'text-red-400' : 'text-green-400'}`}>
-                                                                        {student.status === 'DISTRACTED' ? 'Distracted' : 'Focused'}
+                                                                <div className="flex gap-2 text-xs flex-wrap">
+                                                                    <span className={`${student.status === 'ABSENT' ? 'text-orange-400' :
+                                                                        student.status === 'DISTRACTED' ? 'text-red-400' : 'text-green-400'
+                                                                        }`}>
+                                                                        {student.status === 'ABSENT' ? 'Absent' : student.status === 'DISTRACTED' ? 'Distracted' : 'Focused'}
                                                                     </span>
                                                                     <span className="text-gray-400">•</span>
                                                                     <span className="text-indigo-300 font-bold">
                                                                         Score: {student.score !== undefined ? student.score : 100}%
                                                                     </span>
+                                                                    {student.focusScore !== undefined && (
+                                                                        <>
+                                                                            <span className="text-gray-400">•</span>
+                                                                            <span className={`font-bold ${student.focusScore >= 80 ? 'text-green-300' : student.focusScore >= 50 ? 'text-yellow-300' : 'text-red-300'}`}>
+                                                                                Focus: {student.focusScore}%
+                                                                            </span>
+                                                                        </>
+                                                                    )}
+                                                                    {student.tabSwitchCount > 0 && (
+                                                                        <>
+                                                                            <span className="text-gray-400">•</span>
+                                                                            <span className="text-gray-400">🔀{student.tabSwitchCount}</span>
+                                                                        </>
+                                                                    )}
                                                                 </div>
                                                             </div>
                                                         </div>
-                                                        {student.status === 'DISTRACTED' && (
-                                                            <span className="text-xl">⚠️</span>
-                                                        )}
+                                                        <div className="flex items-center gap-1">
+                                                            {student.status === 'ABSENT' && <span className="text-xs px-1.5 py-0.5 rounded bg-orange-900 text-orange-300 font-bold">ABSENT</span>}
+                                                            {student.status === 'DISTRACTED' && <span className="text-xl">⚠️</span>}
+                                                        </div>
                                                     </div>
                                                 ))
                                             )}
@@ -585,7 +705,8 @@ const LiveClass = () => {
             {showQuizModal && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
                     <div className="bg-white rounded-lg p-6 w-full max-w-lg">
-                        <h2 className="text-xl font-bold mb-4">Create Micro-Quiz</h2>
+                        <h2 className="text-xl font-bold mb-2">Create Micro-Quiz</h2>
+                        <p className="text-sm text-gray-500 mb-4">⏱️ Students will have 60 seconds to answer</p>
                         <form onSubmit={handleCreateQuiz}>
                             <div className="mb-4">
                                 <label className="block text-sm font-medium text-gray-700 mb-2">Question</label>
@@ -678,6 +799,9 @@ const LiveClass = () => {
                                             <th className="p-4 font-semibold">Student Name</th>
                                             <th className="p-4 font-semibold">Status</th>
                                             <th className="p-4 font-semibold">Score</th>
+                                            <th className="p-4 font-semibold">Focus</th>
+                                            <th className="p-4 font-semibold">Tab 🔀</th>
+                                            <th className="p-4 font-semibold">Points</th>
                                             <th className="p-4 font-semibold">Participation</th>
                                         </tr>
                                     </thead>
@@ -686,11 +810,17 @@ const LiveClass = () => {
                                             <tr key={student.id} className="hover:bg-gray-800/50 transition">
                                                 <td className="p-4 font-medium text-white">{student.name || 'Unknown'}</td>
                                                 <td className="p-4">
-                                                    <span className={`px-2 py-1 rounded text-xs font-bold ${student.status === 'DISTRACTED' ? 'bg-red-900 text-red-200' : 'bg-green-900 text-green-200'}`}>
+                                                    <span className={`px-2 py-1 rounded text-xs font-bold ${student.status === 'ABSENT' ? 'bg-orange-900 text-orange-200' :
+                                                        student.status === 'DISTRACTED' ? 'bg-red-900 text-red-200' : 'bg-green-900 text-green-200'
+                                                        }`}>
                                                         {student.status || 'ATTENTIVE'}
                                                     </span>
                                                 </td>
                                                 <td className="p-4 font-bold text-white">{student.score !== undefined ? student.score : 100}%</td>
+                                                <td className={`p-4 font-bold ${(student.focusScore || 100) >= 80 ? 'text-green-400' : (student.focusScore || 100) >= 50 ? 'text-yellow-400' : 'text-red-400'
+                                                    }`}>{student.focusScore !== undefined ? student.focusScore : 100}%</td>
+                                                <td className="p-4 text-gray-300">{student.tabSwitchCount || 0}</td>
+                                                <td className="p-4 font-bold text-yellow-400">{student.points || 0}</td>
                                                 <td className="p-4 text-gray-300">{student.responsesCount || 0} / {student.totalCount || 0}</td>
                                             </tr>
                                         ))}
@@ -701,6 +831,13 @@ const LiveClass = () => {
 
                         {/* Actions */}
                         <div className="flex justify-end gap-4 pt-4 border-t border-gray-700">
+                            {/* NEW ANALYTICS BUTTON */}
+                            <button
+                                onClick={() => window.open(`/teacher/analytics/${classId}`, '_blank')}
+                                className="px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold shadow-lg hover:shadow-indigo-500/20 transition flex items-center gap-2"
+                            >
+                                📊 Analytics
+                            </button>
 
                             {/* NEW CHAT DOWNLOAD BUTTON */}
                             <button

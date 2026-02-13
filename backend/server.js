@@ -187,7 +187,8 @@ io.on('connection', (socket) => {
                 activeStudents: new Set(),
                 studentData: new Map(),
                 waitingStudents: new Map(),
-                teacherSocketId: null
+                teacherSocketId: null,
+                quizStats: new Map() // Track per-quiz answer distribution
             };
         }
 
@@ -305,8 +306,8 @@ io.on('connection', (socket) => {
                 activeStudents: new Set(),
                 studentData: new Map(),
                 waitingStudents: new Map(),
-                waitingStudents: new Map(),
-                teacherSocketId: null
+                teacherSocketId: null,
+                quizStats: new Map()
             };
         }
 
@@ -385,8 +386,91 @@ io.on('connection', (socket) => {
         socket.to(data.classId).emit('new_quiz', data.quiz);
     });
 
-    socket.on('quiz_response', (data) => {
+    socket.on('quiz_response', async (data) => {
+        // data: { classId, studentId, isCorrect, selectedAnswer, quizId }
+        const roomState = await getRoomState(data.classId);
+        if (roomState) {
+            // Initialize quizStats map if needed
+            if (!roomState.quizStats) roomState.quizStats = new Map();
+
+            let stats = roomState.quizStats.get(data.quizId) || { totalResponses: 0, correctCount: 0, answerDistribution: {} };
+            stats.totalResponses++;
+            if (data.isCorrect) stats.correctCount++;
+            if (data.selectedAnswer !== undefined) {
+                stats.answerDistribution[data.selectedAnswer] = (stats.answerDistribution[data.selectedAnswer] || 0) + 1;
+            }
+            roomState.quizStats.set(data.quizId, stats);
+
+
+            // Update individual student quiz stats
+            if (roomState.studentData.has(data.studentId)) {
+                const student = roomState.studentData.get(data.studentId);
+                student.totalQuizCount = (student.totalQuizCount || 0) + 1;
+                if (data.isCorrect) student.correctQuizCount = (student.correctQuizCount || 0) + 1;
+                // Engagement calculation can also be refined here if needed
+                roomState.studentData.set(data.studentId, student);
+            }
+
+            await saveRoomState(data.classId, roomState);
+
+            // Broadcast quiz stats to teacher
+            const allQuizStats = {};
+            roomState.quizStats.forEach((val, key) => { allQuizStats[key] = val; });
+            io.to(data.classId).emit('quiz_stats_update', allQuizStats);
+        }
         socket.to(data.classId).emit('quiz_response', data);
+    });
+
+    // Tab Switch / Idle Tracking
+    socket.on('tab_switch', async (data) => {
+        // data: { classId, studentId, tabSwitchCount, focusScore, totalIdleTime }
+        const roomState = await getRoomState(data.classId);
+        if (roomState && roomState.studentData.has(data.studentId)) {
+            const student = roomState.studentData.get(data.studentId);
+            student.tabSwitchCount = data.tabSwitchCount;
+            student.focusScore = data.focusScore;
+            student.totalIdleTime = data.totalIdleTime;
+            roomState.studentData.set(data.studentId, student);
+            await saveRoomState(data.classId, roomState);
+        }
+        io.to(data.classId).emit('tab_switch_update', data);
+    });
+
+    // Student Absent (below 80% engagement threshold)
+    socket.on('student_absent', async (data) => {
+        // data: { classId, studentId, engagementRate }
+        const roomState = await getRoomState(data.classId);
+        if (roomState && roomState.studentData.has(data.studentId)) {
+            const student = roomState.studentData.get(data.studentId);
+            student.status = 'ABSENT';
+            student.engagementRate = data.engagementRate;
+            roomState.studentData.set(data.studentId, student);
+            await saveRoomState(data.classId, roomState);
+        }
+        io.to(data.classId).emit('student_absent_update', data);
+    });
+
+    // Gamification Points Update
+    socket.on('points_update', async (data) => {
+        // data: { classId, studentId, points, badges }
+        const roomState = await getRoomState(data.classId);
+        if (roomState && roomState.studentData.has(data.studentId)) {
+            const student = roomState.studentData.get(data.studentId);
+            student.points = data.points;
+            student.badges = data.badges;
+            roomState.studentData.set(data.studentId, student);
+            await saveRoomState(data.classId, roomState);
+        }
+
+        // Build leaderboard (top 5)
+        if (roomState) {
+            const leaderboard = Array.from(roomState.studentData.values())
+                .filter(s => s.points !== undefined)
+                .sort((a, b) => (b.points || 0) - (a.points || 0))
+                .slice(0, 5)
+                .map((s, idx) => ({ rank: idx + 1, id: s.id, name: s.name, points: s.points || 0, badges: s.badges || [] }));
+            io.to(data.classId).emit('leaderboard_update', leaderboard);
+        }
     });
 
     // Video Call Signaling (Deprecated by LiveKit, but kept for legacy/fallback if needed)

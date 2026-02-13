@@ -188,6 +188,13 @@ const TeacherDashboard = () => {
                                         <div className="flex justify-between items-center mt-4 pt-4 border-t border-slate-50">
                                             <span className="text-xs text-slate-400">ID: {cls._id.slice(-6)}</span>
                                             <div className="flex gap-2">
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); navigate(`/teacher/analytics/${cls._id}`); }}
+                                                    className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition"
+                                                    title="View Analytics"
+                                                >
+                                                    📊
+                                                </button>
                                                 {!cls.isActive && (
                                                     <button
                                                         onClick={(e) => { e.stopPropagation(); handleResumeClass(cls._id); }}

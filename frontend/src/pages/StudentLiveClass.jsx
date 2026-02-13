@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useSocket } from '../context/SocketContext';
 import api from '../config/api';
@@ -17,6 +17,7 @@ import ChatBox from '../components/ChatBox';
 import PreJoinScreen from '../components/PreJoinScreen';
 import SettingsPanel from '../components/SettingsPanel';
 import BottomControlBar from '../components/BottomControlBar';
+import Leaderboard from '../components/Leaderboard';
 import { Track } from 'livekit-client';
 
 // Component to render video tracks
@@ -104,9 +105,28 @@ const StudentLiveClass = () => {
     const [showAttentionCheck, setShowAttentionCheck] = useState(false);
     const [attentionCheckCount, setAttentionCheckCount] = useState(0);
     const [attentionCheckResponses, setAttentionCheckResponses] = useState(0);
-    const [quizCount, setQuizCount] = useState(0); // New
-    const [quizResponses, setQuizResponses] = useState(0); // New
+    const [quizCount, setQuizCount] = useState(0);
+    const [quizResponses, setQuizResponses] = useState(0);
     const [checkTimeout, setCheckTimeout] = useState(null);
+
+    // Quiz Timer State
+    const [quizTimeLeft, setQuizTimeLeft] = useState(60);
+    const quizTimerRef = useRef(null);
+    const quizStartTimeRef = useRef(null);
+
+    // Tab Switching / Idle Tracking State
+    const [tabSwitchCount, setTabSwitchCount] = useState(0);
+    const [totalIdleTime, setTotalIdleTime] = useState(0);
+    const [focusScore, setFocusScore] = useState(100);
+    const lastHiddenTimeRef = useRef(null);
+
+    // Gamification State
+    const [points, setPoints] = useState(0);
+    const [badges, setBadges] = useState([]);
+    const [consecutiveResponses, setConsecutiveResponses] = useState(0);
+    const [correctQuizCount, setCorrectQuizCount] = useState(0);
+    const [leaderboard, setLeaderboard] = useState([]);
+    const [isMarkedAbsent, setIsMarkedAbsent] = useState(false);
 
     // LiveKit State
     const [token, setToken] = useState("");
@@ -136,14 +156,15 @@ const StudentLiveClass = () => {
         socket.on('class_update', (data) => setActiveStudents(data.activeStudents));
         socket.on('new_quiz', (quiz) => {
             setActiveQuiz(quiz);
-            setQuizCount(prev => prev + 1); // Increment total quizzes
+            setQuizCount(prev => prev + 1);
+            setQuizTimeLeft(60);
+            quizStartTimeRef.current = Date.now();
         });
         socket.on('class_ended', () => { toast.showInfo('The teacher has ended the class.'); navigate('/student'); });
 
         socket.on('join_approved', () => {
             console.log("Join Approved Event Received!");
             setIsWaiting(false);
-            // Now actually join the room for data exchange
             socket.emit('join_class', { classId, studentId: user.id, user: { name: user.name } });
         });
 
@@ -179,7 +200,10 @@ const StudentLiveClass = () => {
             });
         });
 
-
+        // Leaderboard updates
+        socket.on('leaderboard_update', (data) => {
+            setLeaderboard(data);
+        });
 
         // Chat Listener
         socket.on('receive_message', (data) => {
@@ -200,6 +224,7 @@ const StudentLiveClass = () => {
             socket.off('join_error');
             socket.off('join_approved');
             socket.off('receive_message');
+            socket.off('leaderboard_update');
         };
     }, [socket, classId, user.id, user.name, navigate]);
 
@@ -222,9 +247,133 @@ const StudentLiveClass = () => {
         fetchToken();
     }, [classId, user.name]);
 
-    // Random Attention Check Functions
+    // ===== Helper: Update engagement & check 80% threshold =====
+    const checkEngagementThreshold = useCallback((newAttentionResponses, newQuizResponses, newAttentionCount, newQuizCount) => {
+        const totalEvents = newAttentionCount + newQuizCount;
+        const totalResponses = newAttentionResponses + newQuizResponses;
+        const rate = totalEvents > 0 ? Math.round((totalResponses / totalEvents) * 100) : 100;
+
+        // After at least 3 events, check if below 80%
+        if (totalEvents >= 3 && rate < 80 && !isMarkedAbsent) {
+            setIsMarkedAbsent(true);
+            toast.showError('⚠️ Your engagement has dropped below 80%. You have been marked absent!');
+            if (socket) {
+                socket.emit('student_absent', { classId, studentId: user.id, engagementRate: rate });
+            }
+        }
+        return rate;
+    }, [isMarkedAbsent, socket, classId, user.id, toast]);
+
+    // ===== Helper: Update gamification points & badges =====
+    const updatePoints = useCallback((pointsToAdd, isCorrectQuiz = false) => {
+        setPoints(prev => {
+            const newPoints = prev + pointsToAdd;
+            return newPoints;
+        });
+
+        if (isCorrectQuiz) {
+            setCorrectQuizCount(prev => prev + 1);
+        }
+
+        setConsecutiveResponses(prev => {
+            const newConsec = prev + 1;
+            return newConsec;
+        });
+    }, []);
+
+    // Emit points + badges whenever they change
+    useEffect(() => {
+        if (!socket || !hasJoined || isWaiting) return;
+
+        // Compute badges
+        const newBadges = [];
+        if (consecutiveResponses >= 3) newBadges.push('🔥');
+        if (correctQuizCount >= 3) newBadges.push('🧠');
+        if (focusScore === 100 && tabSwitchCount === 0) newBadges.push('👀');
+        setBadges(newBadges);
+
+        socket.emit('points_update', { classId, studentId: user.id, points, badges: newBadges });
+    }, [points, consecutiveResponses, correctQuizCount, focusScore, tabSwitchCount]);
+
+    // ===== Tab Switching / Idle Tracking =====
+    useEffect(() => {
+        if (isWaiting || !hasJoined) return;
+
+        const handleVisibilityChange = () => {
+            if (document.hidden) {
+                // Tab switched away — record the time
+                lastHiddenTimeRef.current = Date.now();
+            } else {
+                // Tab came back — calculate idle time
+                if (lastHiddenTimeRef.current) {
+                    const idleDuration = Date.now() - lastHiddenTimeRef.current;
+                    lastHiddenTimeRef.current = null;
+
+                    setTabSwitchCount(prev => prev + 1);
+                    setTotalIdleTime(prev => prev + idleDuration);
+
+                    // Compute focus score: starts at 100, loses 5 per switch + 2 per idle minute
+                    setTabSwitchCount(prevSwitches => {
+                        const newSwitches = prevSwitches; // already incremented above
+                        setTotalIdleTime(prevIdle => {
+                            const totalIdleMinutes = prevIdle / 60000;
+                            const newFocusScore = Math.max(0, Math.round(100 - (newSwitches * 5) - (totalIdleMinutes * 2)));
+                            setFocusScore(newFocusScore);
+
+                            // Emit to server
+                            if (socket) {
+                                socket.emit('tab_switch', {
+                                    classId,
+                                    studentId: user.id,
+                                    tabSwitchCount: newSwitches,
+                                    focusScore: newFocusScore,
+                                    totalIdleTime: prevIdle
+                                });
+                            }
+                            return prevIdle;
+                        });
+                        return prevSwitches;
+                    });
+                }
+            }
+        };
+
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+    }, [isWaiting, hasJoined, socket, classId, user.id]);
+
+    // ===== Quiz Timer (60-second countdown) =====
+    useEffect(() => {
+        if (!activeQuiz) {
+            // Clear timer when no quiz
+            if (quizTimerRef.current) clearInterval(quizTimerRef.current);
+            return;
+        }
+
+        setQuizTimeLeft(60);
+        quizStartTimeRef.current = Date.now();
+
+        quizTimerRef.current = setInterval(() => {
+            setQuizTimeLeft(prev => {
+                if (prev <= 1) {
+                    // Time's up — auto-dismiss quiz
+                    clearInterval(quizTimerRef.current);
+                    setActiveQuiz(null);
+                    setConsecutiveResponses(0); // Break streak
+                    toast.showError('⏰ Time\'s up! Quiz auto-dismissed.');
+                    return 0;
+                }
+                return prev - 1;
+            });
+        }, 1000);
+
+        return () => {
+            if (quizTimerRef.current) clearInterval(quizTimerRef.current);
+        };
+    }, [activeQuiz?._id]);
+
+    // ===== Random Attention Check Functions =====
     const getRandomInterval = () => {
-        // 5-10 checks per hour = 360-720 seconds between checks
         const min = 360000; // 6 minutes in ms
         const max = 720000; // 12 minutes in ms
         return Math.floor(Math.random() * (max - min + 1)) + min;
@@ -241,10 +390,11 @@ const StudentLiveClass = () => {
             // Auto-dismiss after 5 seconds if no response
             const dismissTimeout = setTimeout(() => {
                 setShowAttentionCheck(false);
-                // Mark as DISTRACTED if no response
-                // Mark as DISTRACTED if no response
+                setConsecutiveResponses(0); // Break streak
+
                 if (socket) {
-                    const totalEvents = attentionCheckCount + 1 + quizCount;
+                    const newAttentionCount = attentionCheckCount + 1;
+                    const totalEvents = newAttentionCount + quizCount;
                     const totalResponses = attentionCheckResponses + quizResponses;
                     const score = totalEvents > 0 ? Math.round((totalResponses / totalEvents) * 100) : 100;
 
@@ -252,12 +402,13 @@ const StudentLiveClass = () => {
                         classId,
                         studentId: user.id,
                         status: 'DISTRACTED',
-                        score: score, // Send composite score
+                        score: score,
                         responsesCount: totalResponses,
                         totalCount: totalEvents
                     });
+
+                    checkEngagementThreshold(attentionCheckResponses, quizResponses, newAttentionCount, quizCount);
                 }
-                // Schedule next check
                 scheduleNextCheck();
             }, 5000);
 
@@ -266,30 +417,29 @@ const StudentLiveClass = () => {
     };
 
     const handleAttentionResponse = () => {
-        // Clear the auto-dismiss timeout
         if (checkTimeout) clearTimeout(checkTimeout);
 
         setShowAttentionCheck(false);
         setAttentionCheckResponses(prev => prev + 1);
+        updatePoints(10); // +10 points for attention response
 
-        // Send ATTENTIVE status
-        // Send ATTENTIVE status
         if (socket) {
             const totalEvents = attentionCheckCount + quizCount;
-            const totalResponses = attentionCheckResponses + 1 + quizResponses; // +1 for this response
+            const totalResponses = attentionCheckResponses + 1 + quizResponses;
             const score = totalEvents > 0 ? Math.round((totalResponses / totalEvents) * 100) : 100;
 
             socket.emit('attention_update', {
                 classId,
                 studentId: user.id,
                 status: 'ATTENTIVE',
-                score: score, // Send composite score
+                score: score,
                 responsesCount: totalResponses,
                 totalCount: totalEvents
             });
+
+            checkEngagementThreshold(attentionCheckResponses + 1, quizResponses, attentionCheckCount, quizCount);
         }
 
-        // Schedule next check
         scheduleNextCheck();
     };
 
@@ -309,18 +459,23 @@ const StudentLiveClass = () => {
 
     const handleQuizSubmit = async (answerIndex) => {
         if (!activeQuiz) return;
+        if (quizTimerRef.current) clearInterval(quizTimerRef.current);
+
+        const responseTime = quizStartTimeRef.current ? Date.now() - quizStartTimeRef.current : 0;
+
         try {
-            await api.post(`${API_URL}/api/quiz/response`, { quizId: activeQuiz._id, studentId: user.id, answer: answerIndex, responseTime: 500 });
+            await api.post(`${API_URL}/api/quiz/response`, { quizId: activeQuiz._id, studentId: user.id, answer: answerIndex, responseTime });
 
             const newQuizResponses = quizResponses + 1;
             setQuizResponses(newQuizResponses);
 
             if (socket) {
-                // Determine correctness
                 const isCorrect = activeQuiz.correctAnswer === answerIndex;
-                socket.emit('quiz_response', { classId, studentId: user.id, isCorrect });
+                socket.emit('quiz_response', { classId, studentId: user.id, isCorrect, selectedAnswer: answerIndex, quizId: activeQuiz._id });
 
-                // Also update attention score on quiz submit
+                // Points: +20 correct, +5 wrong
+                updatePoints(isCorrect ? 20 : 5, isCorrect);
+
                 const totalEvents = attentionCheckCount + quizCount;
                 const totalResponses = attentionCheckResponses + newQuizResponses;
                 const score = totalEvents > 0 ? Math.round((totalResponses / totalEvents) * 100) : 100;
@@ -328,11 +483,13 @@ const StudentLiveClass = () => {
                 socket.emit('attention_update', {
                     classId,
                     studentId: user.id,
-                    status: 'ATTENTIVE', // Submitting a quiz implies attentiveness
+                    status: 'ATTENTIVE',
                     score: score,
                     responsesCount: totalResponses,
                     totalCount: totalEvents
                 });
+
+                checkEngagementThreshold(attentionCheckResponses, newQuizResponses, attentionCheckCount, quizCount);
             }
             setActiveQuiz(null);
             toast.showSuccess('Quiz Submitted!');
@@ -467,21 +624,56 @@ const StudentLiveClass = () => {
                                         <div className="space-y-2 text-sm">
                                             <div className="flex justify-between">
                                                 <span className="text-gray-400">Attention Score</span>
-                                                <span className="font-bold text-green-400">
+                                                <span className={`font-bold ${isMarkedAbsent ? 'text-red-400' : 'text-green-400'}`}>
                                                     {(attentionCheckCount + quizCount) > 0
                                                         ? `${Math.round(((attentionCheckResponses + quizResponses) / (attentionCheckCount + quizCount)) * 100)}%`
                                                         : '--'}
                                                 </span>
                                             </div>
                                             <div className="flex justify-between">
+                                                <span className="text-gray-400">Focus Score</span>
+                                                <span className={`font-bold ${focusScore >= 80 ? 'text-green-400' : focusScore >= 50 ? 'text-yellow-400' : 'text-red-400'}`}>
+                                                    {focusScore}%
+                                                </span>
+                                            </div>
+                                            <div className="flex justify-between">
+                                                <span className="text-gray-400">Tab Switches</span>
+                                                <span className={`text-white ${tabSwitchCount > 5 ? 'text-red-400' : ''}`}>{tabSwitchCount}</span>
+                                            </div>
+                                            <div className="flex justify-between">
                                                 <span className="text-gray-400">Participation</span>
                                                 <span className="text-white">{(attentionCheckResponses + quizResponses)} / {(attentionCheckCount + quizCount)} events</span>
                                             </div>
                                             <div className="flex justify-between">
-                                                <span className="text-gray-400">Total Quiz Responses</span>
+                                                <span className="text-gray-400">Quiz Responses</span>
                                                 <span className="text-white">{quizResponses} / {quizCount}</span>
                                             </div>
+                                            <div className="flex justify-between items-center">
+                                                <span className="text-gray-400">Points</span>
+                                                <span className="font-bold text-yellow-400">{points} pts</span>
+                                            </div>
+                                            {badges.length > 0 && (
+                                                <div className="flex justify-between items-center">
+                                                    <span className="text-gray-400">Badges</span>
+                                                    <div className="flex gap-1">
+                                                        {badges.map((b, i) => <span key={i} className="text-lg" title={
+                                                            b === '🔥' ? 'Streak (3+ consecutive)' : b === '🧠' ? 'Quiz Master (3+ correct)' : 'Focused (100% focus)'
+                                                        }>{b}</span>)}
+                                                    </div>
+                                                </div>
+                                            )}
+                                            {isMarkedAbsent && (
+                                                <div className="mt-2 p-2 bg-red-900/30 border border-red-500/40 rounded-lg text-red-300 text-xs text-center">
+                                                    ⚠️ Marked Absent — engagement below 80%
+                                                </div>
+                                            )}
                                         </div>
+                                    </div>
+
+                                    {/* Leaderboard */}
+                                    <div className="mb-4 bg-[#1c1c1e] rounded p-4">
+                                        <h4 className="font-semibold text-white mb-2">🏆 Leaderboard</h4>
+                                        <Leaderboard leaderboard={leaderboard} currentUserId={user.id} />
                                     </div>
                                 </div>
                             </div>
@@ -513,13 +705,32 @@ const StudentLiveClass = () => {
                     <div className="text-gray-300">|</div>
                     <div className="flex items-center gap-2">
                         <span className="text-gray-300">Attention:</span>
-                        <span className="font-bold text-green-400">
+                        <span className={`font-bold ${isMarkedAbsent ? 'text-red-400' : 'text-green-400'}`}>
                             {(attentionCheckCount + quizCount) > 0
                                 ? `${Math.round(((attentionCheckResponses + quizResponses) / (attentionCheckCount + quizCount)) * 100)}%`
                                 : '--'}
                         </span>
                     </div>
+                    <div className="text-gray-300">|</div>
+                    <div className="flex items-center gap-2">
+                        <span className="text-gray-300">Focus:</span>
+                        <span className={`font-bold ${focusScore >= 80 ? 'text-green-400' : focusScore >= 50 ? 'text-yellow-400' : 'text-red-400'}`}>
+                            {focusScore}%
+                        </span>
+                    </div>
+                    <div className="text-gray-300">|</div>
+                    <div className="flex items-center gap-1">
+                        <span className="text-yellow-400 font-bold">{points}</span>
+                        <span className="text-gray-400">pts</span>
+                    </div>
                 </div>
+
+                {/* Absent Warning Banner */}
+                {isMarkedAbsent && (
+                    <div className="absolute top-14 left-1/2 transform -translate-x-1/2 bg-red-600/90 text-white px-6 py-2 rounded-full text-sm font-semibold animate-pulse z-50">
+                        ⚠️ Engagement below 80% — Marked Absent
+                    </div>
+                )}
 
             </div>
 
@@ -559,12 +770,25 @@ const StudentLiveClass = () => {
                 </div>
             )}
 
-            {/* Quiz Modal */}
+            {/* Quiz Modal with 60-second Timer */}
             {activeQuiz && (
                 <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 animate-fade-in">
                     <div className="bg-white text-gray-800 p-8 rounded-2xl shadow-2xl w-full max-w-lg relative animate-slide-up">
-                        <div className="absolute top-0 left-0 w-full h-2 bg-indigo-600 rounded-t-2xl"></div>
-                        <h2 className="text-2xl font-bold mb-2 text-indigo-700">📝 Live Quiz</h2>
+                        {/* Timer Progress Bar */}
+                        <div className="absolute top-0 left-0 w-full h-2 bg-gray-200 rounded-t-2xl overflow-hidden">
+                            <div
+                                className={`h-full transition-all duration-1000 ease-linear rounded-t-2xl ${quizTimeLeft > 30 ? 'bg-indigo-600' : quizTimeLeft > 10 ? 'bg-yellow-500' : 'bg-red-500'
+                                    }`}
+                                style={{ width: `${(quizTimeLeft / 60) * 100}%` }}
+                            />
+                        </div>
+                        <div className="flex justify-between items-center mb-2">
+                            <h2 className="text-2xl font-bold text-indigo-700">📝 Live Quiz</h2>
+                            <div className={`text-lg font-bold px-3 py-1 rounded-full ${quizTimeLeft > 30 ? 'bg-indigo-100 text-indigo-700' : quizTimeLeft > 10 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700 animate-pulse'
+                                }`}>
+                                ⏱️ {quizTimeLeft}s
+                            </div>
+                        </div>
                         <p className="mb-6 text-lg font-medium">{activeQuiz.question}</p>
                         <div className="space-y-3">
                             {activeQuiz.options.map((option, idx) => (
@@ -580,7 +804,7 @@ const StudentLiveClass = () => {
                                 </button>
                             ))}
                         </div>
-                        <p className="text-xs text-gray-400 mt-6 text-center">Select an answer to submit</p>
+                        <p className="text-xs text-gray-400 mt-6 text-center">Select an answer before time runs out!</p>
                     </div>
                 </div>
             )}
