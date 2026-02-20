@@ -17,7 +17,9 @@ const BottomControlBar = ({
     onRaiseHand,
     isHandRaised = false,
     onToggleAttention, // New prop
-    room // New prop for device switching
+    room, // New prop for device switching
+    onStartAiQuiz,
+    aiQuizActive
 }) => {
     // LiveKit Device Hooks
     const { devices: audioDevices, activeDeviceId: currentAudioDevice, setActiveMediaDevice: setAudioDevice } = useMediaDeviceSelect({ kind: 'audioinput', room });
@@ -237,6 +239,12 @@ const BottomControlBar = ({
                                 </svg>
                                 Create Quiz
                             </button>
+                            {onStartAiQuiz && (
+                                <button onClick={onStartAiQuiz} className={`flex items-center gap-2 ${aiQuizActive ? 'bg-amber-500 animate-pulse' : 'bg-purple-600 hover:bg-purple-700'} text-white px-4 py-2 rounded-lg transition font-medium`}>
+                                    <span>🤖</span>
+                                    {aiQuizActive ? 'AI Quiz Active' : 'AI Quiz'}
+                                </button>
+                            )}
                             <button onClick={onDownloadReport} className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition font-medium">
                                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -305,6 +313,12 @@ const BottomControlBar = ({
                                         <svg className="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                                         <span>Create Quiz</span>
                                     </button>
+                                    {onStartAiQuiz && (
+                                        <button onClick={() => { onStartAiQuiz(); setShowMobileMenu(false); }} className="flex items-center gap-3 text-white hover:bg-[#2c2c2e] p-2 rounded-lg transition w-full text-left">
+                                            <span className="text-lg">🤖</span>
+                                            <span>{aiQuizActive ? 'AI Quiz Active' : 'AI Quiz'}</span>
+                                        </button>
+                                    )}
                                     <button onClick={() => { onDownloadReport(); setShowMobileMenu(false); }} className="flex items-center gap-3 text-white hover:bg-[#2c2c2e] p-2 rounded-lg transition w-full text-left">
                                         <svg className="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                                         <span>Class Report</span>

@@ -44,7 +44,7 @@ const schemas = {
 
   createClass: Joi.object({
     className: Joi.string().required(),
-    subjectCode: Joi.string().required()
+    subjectCode: Joi.string().allow('').optional()
   }),
 
   changePassword: Joi.object({

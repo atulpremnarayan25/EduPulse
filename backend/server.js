@@ -78,9 +78,8 @@ app.use(cors({
 app.use(express.json());
 
 // Data Sanitization
-// Data Sanitization
-// app.use(mongoSanitize()); // Disabled: Incompatible with Express 5 (causing TypeError)
-// app.use(xss()); // Removed: Incompatible with Express 5 & redundant with careful React binding
+// app.use(mongoSanitize()); // Disabled: express-mongo-sanitize@2.x is incompatible with Express 5
+// NoSQL injection is mitigated by Joi validation on inputs + Mongoose schema typing
 
 // Database Connection
 mongoose.connect(process.env.MONGODB_URI)
@@ -493,9 +492,76 @@ io.on('connection', (socket) => {
         console.log('User Disconnected', socket.id);
         handleDisconnect(socket, socket.data.classId);
     });
-});
 
-// Basic Route
+    // ==================== AI QUIZ RANDOM DELIVERY ====================
+    socket.on('start_ai_quiz', async ({ classId, questions }) => {
+        // questions: array of { question, options, correctAnswer }
+        // Get the room state to find active students
+        const roomState = await getRoomState(classId);
+        if (!roomState || roomState.activeStudents.size === 0) {
+            socket.emit('ai_quiz_error', { message: 'No active students in class' });
+            return;
+        }
+
+        const studentIds = Array.from(roomState.activeStudents);
+        const shuffledQuestions = [...questions].sort(() => Math.random() - 0.5);
+
+        // Notify teacher that AI quiz has started
+        socket.emit('ai_quiz_started', { totalQuestions: shuffledQuestions.length, totalStudents: studentIds.length });
+
+        // Send questions to random students at random intervals
+        let questionIndex = 0;
+        const sendNextQuestion = () => {
+            if (questionIndex >= shuffledQuestions.length) {
+                socket.emit('ai_quiz_complete', { message: 'All AI questions delivered' });
+                return;
+            }
+
+            const q = shuffledQuestions[questionIndex];
+            // Pick a random student
+            const randomStudent = studentIds[Math.floor(Math.random() * studentIds.length)];
+
+            // Find the student's socket(s) in the room
+            const roomSockets = io.sockets.adapter.rooms.get(classId);
+            if (roomSockets) {
+                for (const socketId of roomSockets) {
+                    const s = io.sockets.sockets.get(socketId);
+                    if (s && s.data && s.data.studentId === randomStudent) {
+                        s.emit('ai_question_popup', {
+                            questionIndex: questionIndex,
+                            question: q.question,
+                            options: q.options,
+                            correctAnswer: q.correctAnswer,
+                            timeout: 15000 // 15 seconds to answer
+                        });
+                        // Notify teacher which student got which question
+                        socket.emit('ai_quiz_delivery', {
+                            studentId: randomStudent,
+                            studentName: roomState.studentData.has(randomStudent) ? roomState.studentData.get(randomStudent).name : 'Unknown',
+                            questionIndex: questionIndex,
+                            question: q.question
+                        });
+                        break;
+                    }
+                }
+            }
+
+            questionIndex++;
+            // Random interval between 8 and 20 seconds for next question
+            const nextDelay = Math.floor(Math.random() * 12000) + 8000;
+            setTimeout(sendNextQuestion, nextDelay);
+        };
+
+        // Start sending after a short initial delay
+        setTimeout(sendNextQuestion, 3000);
+    });
+
+    socket.on('ai_quiz_response', (data) => {
+        // data: { classId, studentId, studentName, questionIndex, question, selectedAnswer, isCorrect }
+        // Forward the response to the teacher (room)
+        socket.to(data.classId).emit('ai_quiz_student_response', data);
+    });
+});
 
 // Basic Route
 app.get('/', (req, res) => {
@@ -507,6 +573,7 @@ const classRoutes = require('./routes/class.routes');
 const quizRoutes = require('./routes/quiz.routes');
 const analyticsRoutes = require('./routes/analytics.routes');
 const adminRoutes = require('./routes/admin.routes');
+const aiRoutes = require('./routes/ai.routes');
 
 const AppError = require('./utils/AppError');
 const globalErrorHandler = require('./middleware/error');
@@ -516,6 +583,7 @@ app.use('/api/class', classRoutes);
 app.use('/api/quiz', quizRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/ai', aiRoutes);
 
 // Handle Unhandled Routes
 app.all(/(.*)/, (req, res, next) => {

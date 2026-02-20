@@ -6,7 +6,10 @@ const handleCastErrorDB = err => {
 };
 
 const handleDuplicateFieldsDB = err => {
-    const value = err.errmsg.match(/(["'])(\\?.)*?\1/)[0];
+    // MongoDB driver 3.x uses err.errmsg, newer drivers use err.message
+    const errorMsg = err.errmsg || err.message || '';
+    const match = errorMsg.match(/(["'])(\\?.)*?\1/);
+    const value = match ? match[0] : 'unknown';
     const message = `Duplicate field value: ${value}. Please use another value!`;
     return new AppError(message, 400);
 };
@@ -55,9 +58,8 @@ module.exports = (err, req, res, next) => {
     err.statusCode = err.statusCode || 500;
     err.status = err.status || 'error';
 
-    if (process.env.NODE_ENV === 'development') {
-        sendErrorDev(err, res);
-    } else {
+    // Default to dev error mode unless explicitly in production
+    if (process.env.NODE_ENV === 'production') {
         let error = { ...err };
         error.message = err.message;
         error.name = err.name; // Explicitly copy name // Error message is not enumerable
@@ -69,5 +71,7 @@ module.exports = (err, req, res, next) => {
         if (error.name === 'TokenExpiredError') error = handleJWTExpiredError();
 
         sendErrorProd(error, res);
+    } else {
+        sendErrorDev(err, res);
     }
 };

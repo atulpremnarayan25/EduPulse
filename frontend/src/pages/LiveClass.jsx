@@ -53,7 +53,9 @@ const ControlBarWrapper = ({
     onDownloadReport,
     waitingCount,
     onToggleAttention, // New
-    room
+    room,
+    onStartAiQuiz,
+    aiQuizActive
 }) => {
     const { localParticipant } = useLocalParticipant();
 
@@ -89,6 +91,8 @@ const ControlBarWrapper = ({
             waitingCount={waitingCount}
             onToggleAttention={onToggleAttention} // New
             room={room}
+            onStartAiQuiz={onStartAiQuiz}
+            aiQuizActive={aiQuizActive}
         />
     );
 };
@@ -124,6 +128,12 @@ const LiveClass = () => {
     const [showAttention, setShowAttention] = useState(false);
     const [showReportModal, setShowReportModal] = useState(false);
     const [livekitRoom, setLivekitRoom] = useState(null);
+
+    // AI Quiz State
+    const [showAiQuizModal, setShowAiQuizModal] = useState(false);
+    const [aiQuestionBanks, setAiQuestionBanks] = useState([]);
+    const [aiQuizLog, setAiQuizLog] = useState([]);
+    const [aiQuizActive, setAiQuizActive] = useState(false);
 
     // LiveKit State
     const [token, setToken] = useState("");
@@ -275,6 +285,31 @@ const LiveClass = () => {
             setLeaderboard(data);
         });
 
+        // AI Quiz events
+        socket.on('ai_quiz_started', (data) => {
+            setAiQuizActive(true);
+            setAiQuizLog(prev => [...prev, { type: 'info', message: `AI Quiz started: ${data.totalQuestions} questions for ${data.totalStudents} students`, time: new Date() }]);
+            toast.showSuccess(`AI Quiz started! ${data.totalQuestions} questions will be sent to ${data.totalStudents} students`);
+        });
+
+        socket.on('ai_quiz_delivery', (data) => {
+            setAiQuizLog(prev => [...prev, { type: 'sent', studentName: data.studentName, question: data.question, time: new Date() }]);
+        });
+
+        socket.on('ai_quiz_complete', () => {
+            setAiQuizActive(false);
+            setAiQuizLog(prev => [...prev, { type: 'info', message: 'All AI questions delivered!', time: new Date() }]);
+            toast.showSuccess('AI Quiz complete! All questions delivered.');
+        });
+
+        socket.on('ai_quiz_student_response', (data) => {
+            setAiQuizLog(prev => [...prev, { type: 'response', studentName: data.studentName, question: data.question, isCorrect: data.isCorrect, time: new Date() }]);
+        });
+
+        socket.on('ai_quiz_error', (data) => {
+            toast.showError(data.message);
+        });
+
         return () => {
             socket.emit('leave_class', { classId });
             socket.off('class_update');
@@ -287,6 +322,11 @@ const LiveClass = () => {
             socket.off('student_absent_update');
             socket.off('quiz_stats_update');
             socket.off('leaderboard_update');
+            socket.off('ai_quiz_started');
+            socket.off('ai_quiz_delivery');
+            socket.off('ai_quiz_complete');
+            socket.off('ai_quiz_student_response');
+            socket.off('ai_quiz_error');
         };
     }, [socket, classId]);
 
@@ -407,6 +447,27 @@ const LiveClass = () => {
 
     const handleDownloadReport = () => {
         window.open(`${API_URL}/api/analytics/report/${classId}`, '_blank');
+    };
+
+    const handleStartAiQuiz = async () => {
+        try {
+            const res = await api.get(`/api/ai/questions/${classId}`);
+            setAiQuestionBanks(res.data);
+            if (res.data.length === 0) {
+                toast.showError('No saved AI question banks for this class. Generate questions from the Teacher Dashboard first.');
+                return;
+            }
+            setShowAiQuizModal(true);
+        } catch (error) {
+            toast.showError('Failed to load question banks');
+        }
+    };
+
+    const triggerAiQuiz = (bank) => {
+        if (socket) {
+            socket.emit('start_ai_quiz', { classId, questions: bank.questions });
+            setShowAiQuizModal(false);
+        }
     };
 
     if (!token || !liveKitUrl) {
@@ -699,6 +760,8 @@ const LiveClass = () => {
                 waitingCount={waitingStudents.length}
                 onToggleAttention={() => setShowAttention(!showAttention)} // New Handler
                 room={livekitRoom}
+                onStartAiQuiz={handleStartAiQuiz}
+                aiQuizActive={aiQuizActive}
             />
 
             {/* Quiz Modal */}
@@ -743,6 +806,38 @@ const LiveClass = () => {
                                 <button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded">Send Quiz</button>
                             </div>
                         </form>
+                    </div>
+                </div>
+            )}
+
+            {/* AI Quiz Selection Modal */}
+            {showAiQuizModal && (
+                <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
+                    <div className="bg-white rounded-2xl p-6 w-full max-w-lg max-h-[80vh] overflow-y-auto shadow-2xl">
+                        <div className="flex items-center justify-between mb-4">
+                            <h2 className="text-xl font-bold text-slate-800">🤖 Start AI Quiz</h2>
+                            <button onClick={() => setShowAiQuizModal(false)} className="text-slate-400 hover:text-slate-600 transition">✕</button>
+                        </div>
+                        <p className="text-sm text-slate-500 mb-4">Select a question bank to randomly deliver to students</p>
+                        {aiQuestionBanks.length === 0 ? (
+                            <p className="text-center text-slate-400 py-8">No question banks found. Generate questions from the Teacher Dashboard first.</p>
+                        ) : (
+                            <div className="space-y-3">
+                                {aiQuestionBanks.map(bank => (
+                                    <div key={bank._id} className="border border-slate-200 rounded-xl p-4 hover:border-indigo-300 hover:shadow-md transition cursor-pointer group" onClick={() => triggerAiQuiz(bank)}>
+                                        <div className="flex items-center justify-between">
+                                            <div>
+                                                <h3 className="font-bold text-slate-800 group-hover:text-indigo-600 transition">{bank.topic}</h3>
+                                                <p className="text-xs text-slate-500">{bank.questions.length} questions · {new Date(bank.createdAt).toLocaleDateString()}</p>
+                                            </div>
+                                            <button className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-indigo-700 transition opacity-0 group-hover:opacity-100">
+                                                Start →
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
                     </div>
                 </div>
             )}

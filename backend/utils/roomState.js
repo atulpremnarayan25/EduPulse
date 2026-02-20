@@ -13,7 +13,8 @@ async function getRoomState(classId) {
             activeStudents: new Set(parsed.activeStudents || []),
             studentData: new Map(Object.entries(parsed.studentData || {})),
             waitingStudents: new Map(Object.entries(parsed.waitingStudents || {})),
-            teacherSocketId: parsed.teacherSocketId
+            teacherSocketId: parsed.teacherSocketId,
+            quizStats: new Map(Object.entries(parsed.quizStats || {}))
         };
     } catch (error) {
         console.error(`Error fetching room state for ${classId}:`, error);
@@ -30,7 +31,8 @@ async function saveRoomState(classId, state) {
             activeStudents: Array.from(state.activeStudents),
             studentData: Object.fromEntries(state.studentData),
             waitingStudents: Object.fromEntries(state.waitingStudents),
-            teacherSocketId: state.teacherSocketId
+            teacherSocketId: state.teacherSocketId,
+            quizStats: state.quizStats ? Object.fromEntries(state.quizStats) : {}
         };
         await redisClient.set(`room:${classId}`, JSON.stringify(serialized));
     } catch (error) {

@@ -26,28 +26,43 @@ const AnalyticsDashboard = () => {
 
     // Initial connection
     useEffect(() => {
-        const newSocket = io(SOCKET_URL);
+        const token = localStorage.getItem('token');
+        const newSocket = io(SOCKET_URL, {
+            auth: { token }
+        });
         setSocket(newSocket);
+
+        // Fallback timeout: if no data arrives in 5s, stop loading (class may be empty)
+        const loadingTimeout = setTimeout(() => {
+            setIsLoading(false);
+        }, 5000);
 
         newSocket.on('connect', () => {
             console.log('Connected to analytics socket');
             // Join as teacher (observer)
             newSocket.emit('join_class', {
                 classId,
-                name: 'Teacher (Analytics)',
-                role: 'teacher',
-                userId: `analytics-${Date.now()}`
+                studentId: 'TEACHER',
+                user: { name: 'Teacher (Analytics)' }
             });
         });
 
-        // Listen for all state updates
-        newSocket.on('full_state_sync', (data) => {
-            // Convert array to map or verify structure
-            // server sends studentData as object or array?
-            // checking server.js: it sends roomState.studentData (Map converted to Object)
-            setStudentStates(data.studentData || {});
-            setQuizStats(data.quizStats || {});
+        newSocket.on('connect_error', (err) => {
+            console.error('Analytics socket connection error:', err.message);
             setIsLoading(false);
+        });
+
+        // Listen for all state updates
+        // Server sends { students: [...] } — an array of student objects
+        newSocket.on('full_state_sync', (data) => {
+            const studentsArray = data.students || [];
+            const statesMap = {};
+            studentsArray.forEach(s => {
+                if (s.id) statesMap[s.id] = s;
+            });
+            setStudentStates(statesMap);
+            setIsLoading(false);
+            clearTimeout(loadingTimeout);
         });
 
         newSocket.on('student_joined', ({ student }) => {
@@ -114,7 +129,10 @@ const AnalyticsDashboard = () => {
         });
 
         // Cleanup
-        return () => newSocket.disconnect();
+        return () => {
+            clearTimeout(loadingTimeout);
+            newSocket.disconnect();
+        };
     }, [classId]);
 
     // Derived Stats
@@ -237,8 +255,8 @@ const AnalyticsDashboard = () => {
                         key={tab}
                         onClick={() => setActiveTab(tab.toLowerCase())}
                         className={`pb-2 px-4 text-sm font-medium transition-colors relative ${activeTab === tab.toLowerCase()
-                                ? 'text-indigo-400'
-                                : 'text-gray-400 hover:text-gray-200'
+                            ? 'text-indigo-400'
+                            : 'text-gray-400 hover:text-gray-200'
                             }`}
                     >
                         {tab}
@@ -341,8 +359,8 @@ const AnalyticsDashboard = () => {
                                         <td className="p-4 font-medium text-white">{student.name}</td>
                                         <td className="p-4">
                                             <span className={`px-2 py-1 rounded-full text-xs font-bold ${student.status === 'ABSENT' ? 'bg-red-500/20 text-red-400' :
-                                                    student.status === 'DISTRACTED' ? 'bg-yellow-500/20 text-yellow-400' :
-                                                        'bg-green-500/20 text-green-400'
+                                                student.status === 'DISTRACTED' ? 'bg-yellow-500/20 text-yellow-400' :
+                                                    'bg-green-500/20 text-green-400'
                                                 }`}>
                                                 {student.status || 'ACTIVE'}
                                             </span>
@@ -399,7 +417,7 @@ const AnalyticsDashboard = () => {
                                                         className="w-full bg-indigo-500/50 rounded-t hover:bg-indigo-500 transition-colors"
                                                         style={{ height: `${(count / stats.totalResponses) * 100}%` }}
                                                     />
-                                                    <span className="text-xs text-gray-400">Ont {parseInt(ans) + 1}</span>
+                                                    <span className="text-xs text-gray-400">Opt {parseInt(ans) + 1}</span>
                                                 </div>
                                             ))}
                                         </div>

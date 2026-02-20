@@ -1,5 +1,5 @@
 const { Class, AttentionLog, SessionReport } = require('../models');
-const { getRoomState, saveRoomState } = require('../utils/roomState');
+const { getRoomState, saveRoomState, deleteRoomState } = require('../utils/roomState');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/AppError');
 
@@ -132,17 +132,8 @@ exports.endClass = catchAsync(async (req, res, next) => {
             console.log(`[SESSION REPORT] Saved report for class ${classId}`);
         }
 
-        await saveRoomState(classId, roomState); // Save cleared waiting list state, actually we are about to delete it?
-        // Wait, server.js handles auto-delete if empty. But here we are ending it explicitly.
-        // We should explicitly clear the room state or let server.js handle it?
-        // server.js handles it if users disconnect. But if we end class, users MIGHT stay connected technically until they receive event and disconnect themselves.
-        // Let's rely on deleteRoomState which isn't imported here? 
-        // Oh, we import get/save but not delete.
-        // Actually, if we set isActive:false, server.js join logic blocks new joins.
-        // Existing sockets are still connected.
-        // Let's just save the report. The room state cleanup can happen naturally or we can force it.
-        // Ideally we should delete room state. But I don't have deleteRoomState imported.
-        // Let's trust the existing flow for now, just adding the report save is the key.
+        // Clean up Redis room state now that the class has ended
+        await deleteRoomState(classId);
     }
 
     res.json(updatedClass);

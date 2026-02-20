@@ -5,7 +5,7 @@ import { useToast } from '../context/ToastContext';
 import { useConfirm } from '../context/ConfirmContext';
 
 const TeacherDashboard = () => {
-    const [activeTab, setActiveTab] = useState('live'); // 'live' or 'students'
+    const [activeTab, setActiveTab] = useState('live'); // 'live', 'students', or 'ai'
     const [loading, setLoading] = useState(true);
     const [user] = useState(() => JSON.parse(localStorage.getItem('user')));
 
@@ -20,6 +20,16 @@ const TeacherDashboard = () => {
     const [showAddStudentModal, setShowAddStudentModal] = useState(false);
     const [newStudentData, setNewStudentData] = useState({ name: '', rollNo: '', email: '' });
 
+    // AI Questions State
+    const [aiTopic, setAiTopic] = useState('');
+    const [aiCount, setAiCount] = useState(5);
+    const [aiClassId, setAiClassId] = useState('');
+    const [aiQuestions, setAiQuestions] = useState([]); // Generated questions for review
+    const [aiGenerating, setAiGenerating] = useState(false);
+    const [savedBanks, setSavedBanks] = useState([]);
+    const [aiSaving, setAiSaving] = useState(false);
+    const [expandedBankId, setExpandedBankId] = useState(null);
+
     const navigate = useNavigate();
     const toast = useToast();
     const confirm = useConfirm();
@@ -27,8 +37,10 @@ const TeacherDashboard = () => {
     useEffect(() => {
         if (activeTab === 'live') {
             fetchClasses();
-        } else {
+        } else if (activeTab === 'students') {
             fetchMyClassData();
+        } else if (activeTab === 'ai') {
+            fetchClasses(); // Need classes list for the dropdown
         }
     }, [activeTab]);
 
@@ -141,6 +153,12 @@ const TeacherDashboard = () => {
                     >
                         My Class & Students
                     </button>
+                    <button
+                        onClick={() => setActiveTab('ai')}
+                        className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'ai' ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}
+                    >
+                        ✨ AI Questions
+                    </button>
                 </div>
             </div>
 
@@ -218,7 +236,7 @@ const TeacherDashboard = () => {
                             </div>
                         )}
                     </div>
-                ) : (
+                ) : activeTab === 'students' ? (
                     // STUDENTS TAB
                     <div className="animate-slide-in">
                         {!myClass ? (
@@ -297,7 +315,200 @@ const TeacherDashboard = () => {
                             </>
                         )}
                     </div>
-                )}
+                ) : activeTab === 'ai' ? (
+                    // AI QUESTIONS TAB
+                    <div className="space-y-8">
+                        {/* Generator Card */}
+                        <div className="bg-gradient-to-r from-purple-600 via-indigo-600 to-blue-600 rounded-2xl p-8 text-white relative overflow-hidden shadow-xl">
+                            <div className="absolute top-0 right-0 w-72 h-72 bg-white/10 rounded-full -translate-y-1/2 translate-x-1/2 blur-3xl"></div>
+                            <div className="relative z-10">
+                                <h2 className="text-2xl font-extrabold mb-1">🤖 AI Question Generator</h2>
+                                <p className="text-white/70 mb-6">Enter a topic and let AI create quiz questions for your class</p>
+
+                                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                                    <div className="md:col-span-1">
+                                        <label className="block text-xs font-bold text-white/80 mb-1">Class Session</label>
+                                        <select
+                                            value={aiClassId}
+                                            onChange={e => setAiClassId(e.target.value)}
+                                            className="w-full px-3 py-2.5 rounded-lg bg-white/20 border border-white/30 text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-white/50 text-sm"
+                                        >
+                                            <option value="" className="text-slate-800">Select class...</option>
+                                            {classes.map(cls => (
+                                                <option key={cls._id} value={cls._id} className="text-slate-800">
+                                                    {cls.className} ({cls.subjectCode || 'No code'})
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div className="md:col-span-2">
+                                        <label className="block text-xs font-bold text-white/80 mb-1">Topic</label>
+                                        <input
+                                            type="text"
+                                            value={aiTopic}
+                                            onChange={e => setAiTopic(e.target.value)}
+                                            placeholder="e.g. Newton's Laws of Motion"
+                                            className="w-full px-4 py-2.5 rounded-lg bg-white/20 border border-white/30 text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-white/50"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-white/80 mb-1">Count</label>
+                                        <input
+                                            type="number"
+                                            value={aiCount}
+                                            onChange={e => setAiCount(Math.min(15, Math.max(1, parseInt(e.target.value) || 1)))}
+                                            min="1"
+                                            max="15"
+                                            className="w-full px-4 py-2.5 rounded-lg bg-white/20 border border-white/30 text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-white/50"
+                                        />
+                                    </div>
+                                </div>
+
+                                <button
+                                    onClick={handleGenerateQuestions}
+                                    disabled={aiGenerating || !aiTopic.trim() || !aiClassId}
+                                    className="px-8 py-3 bg-white text-indigo-700 font-bold rounded-xl hover:bg-white/90 transition shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                                >
+                                    {aiGenerating ? (
+                                        <><div className="animate-spin rounded-full h-5 w-5 border-b-2 border-indigo-700"></div> Generating...</>
+                                    ) : (
+                                        <>✨ Generate Questions</>
+                                    )}
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Generated Questions Review */}
+                        {aiQuestions.length > 0 && (
+                            <div>
+                                <div className="flex justify-between items-center mb-4">
+                                    <h3 className="text-xl font-bold text-slate-800">📝 Review Generated Questions ({aiQuestions.filter(q => q.approved).length}/{aiQuestions.length} approved)</h3>
+                                    <button
+                                        onClick={handleSaveQuestions}
+                                        disabled={aiSaving || aiQuestions.filter(q => q.approved).length === 0}
+                                        className="px-6 py-2 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl shadow-lg transition disabled:opacity-50 flex items-center gap-2"
+                                    >
+                                        {aiSaving ? (
+                                            <><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div> Saving...</>
+                                        ) : (
+                                            <>💾 Save & Finalize</>
+                                        )}
+                                    </button>
+                                </div>
+
+                                <div className="space-y-4">
+                                    {aiQuestions.map((q, idx) => (
+                                        <div
+                                            key={q.id}
+                                            className={`bg-white rounded-xl border-2 p-5 transition-all ${q.approved ? 'border-green-200 shadow-sm' : 'border-red-200 opacity-60'
+                                                }`}
+                                        >
+                                            <div className="flex items-start justify-between gap-4 mb-3">
+                                                <div className="flex items-center gap-3 flex-1">
+                                                    <span className="bg-indigo-100 text-indigo-700 font-bold text-xs px-2.5 py-1 rounded-lg">Q{idx + 1}</span>
+                                                    <input
+                                                        type="text"
+                                                        value={q.question}
+                                                        onChange={e => updateQuestion(q.id, 'question', e.target.value)}
+                                                        className="flex-1 font-medium text-slate-800 bg-transparent border-b border-transparent hover:border-slate-300 focus:border-indigo-500 focus:outline-none px-1 py-0.5 transition"
+                                                    />
+                                                </div>
+                                                <div className="flex items-center gap-2 flex-shrink-0">
+                                                    <button
+                                                        onClick={() => updateQuestion(q.id, 'approved', !q.approved)}
+                                                        className={`text-xs px-3 py-1 rounded-full font-bold transition ${q.approved ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-red-100 text-red-700 hover:bg-red-200'}`}
+                                                    >
+                                                        {q.approved ? '✓ Approved' : '✗ Rejected'}
+                                                    </button>
+                                                    <button
+                                                        onClick={() => removeQuestion(q.id)}
+                                                        className="text-slate-400 hover:text-red-500 transition p-1"
+                                                        title="Delete question"
+                                                    >
+                                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 ml-10">
+                                                {q.options.map((opt, optIdx) => (
+                                                    <div key={optIdx} className="flex items-center gap-2">
+                                                        <button
+                                                            onClick={() => updateQuestion(q.id, 'correctAnswer', optIdx)}
+                                                            className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 transition ${q.correctAnswer === optIdx
+                                                                ? 'bg-green-500 text-white shadow-md'
+                                                                : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                                                                }`}
+                                                            title={q.correctAnswer === optIdx ? 'Correct answer' : 'Set as correct'}
+                                                        >
+                                                            {String.fromCharCode(65 + optIdx)}
+                                                        </button>
+                                                        <input
+                                                            type="text"
+                                                            value={opt}
+                                                            onChange={e => updateOption(q.id, optIdx, e.target.value)}
+                                                            className="flex-1 text-sm text-slate-600 bg-transparent border-b border-transparent hover:border-slate-300 focus:border-indigo-500 focus:outline-none px-1 py-0.5 transition"
+                                                        />
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Saved Question Banks */}
+                        {savedBanks.length > 0 && (
+                            <div>
+                                <h3 className="text-xl font-bold text-slate-800 mb-4">📚 Saved Question Banks</h3>
+                                <div className="space-y-3">
+                                    {savedBanks.map(bank => (
+                                        <div key={bank._id} className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+                                            <div
+                                                onClick={() => setExpandedBankId(expandedBankId === bank._id ? null : bank._id)}
+                                                className="p-4 flex items-center justify-between cursor-pointer hover:bg-slate-50 transition"
+                                            >
+                                                <div className="flex items-center gap-3">
+                                                    <span className="bg-purple-100 text-purple-700 font-bold text-xs px-2.5 py-1 rounded-lg">{bank.questions.length} Q</span>
+                                                    <div>
+                                                        <h4 className="font-bold text-slate-800">{bank.topic}</h4>
+                                                        <p className="text-xs text-slate-500">{new Date(bank.createdAt).toLocaleDateString()} · {new Date(bank.createdAt).toLocaleTimeString()}</p>
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <button
+                                                        onClick={(e) => { e.stopPropagation(); handleDeleteBank(bank._id); }}
+                                                        className="text-slate-400 hover:text-red-500 p-1 transition"
+                                                    >
+                                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                                    </button>
+                                                    <svg className={`w-5 h-5 text-slate-400 transition-transform ${expandedBankId === bank._id ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                                                </div>
+                                            </div>
+                                            {expandedBankId === bank._id && (
+                                                <div className="border-t border-slate-100 p-4 space-y-3 bg-slate-50">
+                                                    {bank.questions.map((q, i) => (
+                                                        <div key={i} className="bg-white rounded-lg p-3 border border-slate-100">
+                                                            <p className="font-medium text-sm text-slate-800 mb-2"><span className="text-indigo-600 font-bold">Q{i + 1}.</span> {q.question}</p>
+                                                            <div className="grid grid-cols-2 gap-1 text-xs">
+                                                                {q.options.map((opt, oi) => (
+                                                                    <span key={oi} className={`px-2 py-1 rounded ${q.correctAnswer === oi ? 'bg-green-100 text-green-700 font-bold' : 'text-slate-500'}`}>
+                                                                        {String.fromCharCode(65 + oi)}. {opt}
+                                                                    </span>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                ) : null}
             </div>
 
             {/* MODALS */}

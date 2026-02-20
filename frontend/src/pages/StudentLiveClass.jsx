@@ -114,6 +114,11 @@ const StudentLiveClass = () => {
     const quizTimerRef = useRef(null);
     const quizStartTimeRef = useRef(null);
 
+    // AI Question Popup State
+    const [aiPopupQuestion, setAiPopupQuestion] = useState(null);
+    const [aiPopupTimeLeft, setAiPopupTimeLeft] = useState(15);
+    const aiPopupTimerRef = useRef(null);
+
     // Tab Switching / Idle Tracking State
     const [tabSwitchCount, setTabSwitchCount] = useState(0);
     const [totalIdleTime, setTotalIdleTime] = useState(0);
@@ -210,6 +215,12 @@ const StudentLiveClass = () => {
             setMessages((prev) => [...prev, data]);
         });
 
+        // AI Question Popup
+        socket.on('ai_question_popup', (data) => {
+            setAiPopupQuestion(data);
+            setAiPopupTimeLeft(data.timeout || 15);
+        });
+
         console.log("Registered join_approved listener");
 
         // Request to join
@@ -225,6 +236,7 @@ const StudentLiveClass = () => {
             socket.off('join_approved');
             socket.off('receive_message');
             socket.off('leaderboard_update');
+            socket.off('ai_question_popup');
         };
     }, [socket, classId, user.id, user.name, navigate]);
 
@@ -455,6 +467,41 @@ const StudentLiveClass = () => {
         const newState = !isHandRaised;
         setIsHandRaised(newState);
         if (socket) socket.emit('raise_hand', { classId, studentId: user.id, raised: newState, name: user.name });
+    };
+
+    // AI Question popup timer
+    useEffect(() => {
+        if (!aiPopupQuestion) return;
+        aiPopupTimerRef.current = setInterval(() => {
+            setAiPopupTimeLeft(prev => {
+                if (prev <= 1) {
+                    clearInterval(aiPopupTimerRef.current);
+                    setAiPopupQuestion(null);
+                    return 0;
+                }
+                return prev - 1;
+            });
+        }, 1000);
+        return () => clearInterval(aiPopupTimerRef.current);
+    }, [aiPopupQuestion]);
+
+    const handleAiQuizAnswer = (answerIndex) => {
+        if (!aiPopupQuestion) return;
+        const isCorrect = aiPopupQuestion.correctAnswer === answerIndex;
+        if (socket) {
+            socket.emit('ai_quiz_response', {
+                classId,
+                studentId: user.id,
+                studentName: user.name,
+                questionIndex: aiPopupQuestion.questionIndex,
+                question: aiPopupQuestion.question,
+                selectedAnswer: answerIndex,
+                isCorrect
+            });
+        }
+        clearInterval(aiPopupTimerRef.current);
+        toast.showInfo(isCorrect ? '✅ Correct!' : '❌ Incorrect');
+        setAiPopupQuestion(null);
     };
 
     const handleQuizSubmit = async (answerIndex) => {
@@ -805,6 +852,43 @@ const StudentLiveClass = () => {
                             ))}
                         </div>
                         <p className="text-xs text-gray-400 mt-6 text-center">Select an answer before time runs out!</p>
+                    </div>
+                </div>
+            )}
+
+            {/* AI Question Popup */}
+            {aiPopupQuestion && (
+                <div className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-[60] animate-fade-in backdrop-blur-sm">
+                    <div className="bg-gradient-to-br from-purple-600 to-indigo-700 text-white p-8 rounded-2xl shadow-2xl w-full max-w-lg relative animate-slide-up">
+                        {/* Timer */}
+                        <div className="absolute top-0 left-0 w-full h-2 bg-white/20 rounded-t-2xl overflow-hidden">
+                            <div
+                                className={`h-full transition-all duration-1000 ease-linear ${aiPopupTimeLeft > 8 ? 'bg-green-400' : aiPopupTimeLeft > 4 ? 'bg-yellow-400' : 'bg-red-400'}`}
+                                style={{ width: `${(aiPopupTimeLeft / 15) * 100}%` }}
+                            />
+                        </div>
+                        <div className="flex justify-between items-center mb-4">
+                            <h2 className="text-xl font-bold flex items-center gap-2">🤖 AI Pop Quiz!</h2>
+                            <div className={`text-lg font-bold px-3 py-1 rounded-full ${aiPopupTimeLeft > 8 ? 'bg-white/20' : aiPopupTimeLeft > 4 ? 'bg-yellow-400/30' : 'bg-red-400/30 animate-pulse'}`}>
+                                ⏱️ {aiPopupTimeLeft}s
+                            </div>
+                        </div>
+                        <p className="mb-6 text-lg font-medium">{aiPopupQuestion.question}</p>
+                        <div className="space-y-3">
+                            {aiPopupQuestion.options.map((option, idx) => (
+                                <button
+                                    key={idx}
+                                    onClick={() => handleAiQuizAnswer(idx)}
+                                    className="w-full text-left p-4 rounded-xl border-2 border-white/30 hover:border-white hover:bg-white/20 transition-all duration-200 flex items-center gap-3 group"
+                                >
+                                    <span className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center font-bold group-hover:bg-white group-hover:text-indigo-700 transition-colors">
+                                        {String.fromCharCode(65 + idx)}
+                                    </span>
+                                    <span className="font-medium">{option}</span>
+                                </button>
+                            ))}
+                        </div>
+                        <p className="text-xs text-white/60 mt-4 text-center">Answer quickly — this is a surprise question from your teacher!</p>
                     </div>
                 </div>
             )}

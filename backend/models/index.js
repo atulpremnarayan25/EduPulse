@@ -83,6 +83,19 @@ const QuizResponseSchema = new mongoose.Schema({
     timestamp: { type: Date, default: Date.now }
 });
 
+const AIQuestionBankSchema = new mongoose.Schema({
+    classId: { type: mongoose.Schema.Types.ObjectId, ref: 'Class', required: true },
+    topic: { type: String, required: true },
+    questions: [{
+        question: { type: String, required: true },
+        options: [{ type: String }],
+        correctAnswer: { type: Number },
+        approved: { type: Boolean, default: true }
+    }],
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Teacher', required: true },
+    createdAt: { type: Date, default: Date.now }
+});
+
 const Admin = mongoose.model('Admin', AdminSchema);
 const ClassSection = mongoose.model('ClassSection', ClassSectionSchema);
 const Student = mongoose.model('Student', StudentSchema);
@@ -91,7 +104,8 @@ const Class = mongoose.model('Class', ClassSchema);
 const AttentionLog = mongoose.model('AttentionLog', AttentionLogSchema);
 const Quiz = mongoose.model('Quiz', QuizSchema);
 const QuizResponse = mongoose.model('QuizResponse', QuizResponseSchema);
+const AIQuestionBank = mongoose.model('AIQuestionBank', AIQuestionBankSchema);
 
 const SessionReport = require('./SessionReport');
 
-module.exports = { Admin, ClassSection, Student, Teacher, Class, AttentionLog, Quiz, QuizResponse, SessionReport };
+module.exports = { Admin, ClassSection, Student, Teacher, Class, AttentionLog, Quiz, QuizResponse, AIQuestionBank, SessionReport };
